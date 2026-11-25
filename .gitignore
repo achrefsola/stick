@@ -1,5 +1,5 @@
 # --- stickman-short working tree ---------------------------------------------
-# Build intermediates (the delivered artefact lives in stickman-short/out/)
+# Build intermediates — the delivered artefact lives in the repository ROOT
 stickman-short/frames/
 stickman-short/stills/
 stickman-short/review/
@@ -8,8 +8,11 @@ stickman-short/mix_raw.wav
 stickman-short/mix.wav
 stickman-short/music.wav
 stickman-short/sfx.wav
-# tooling / scratch
+# tooling / scratch (node_modules is npm-installable; the published skill keeps its own copy)
 stickman-short/node_modules/
 work/
 *.log
 script.txt
+
+# regenerable: qa_sheet lives in stale/qa_sheet_current.jpg
+stickman-short/out/
