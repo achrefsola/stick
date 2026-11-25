@@ -1,8 +1,22 @@
 // ============================================================ 2D WORLD
-// Flat painted backdrops + camera + fx for the stick man shorts.
+// Flat painted backdrops + props + fx for the stick man shorts.
 // No 3D, no textures — shapes, gradients and a few noise flecks.
-// A backdrop is a function (g, W, H, t) painting in WORLD coordinates
+// A backdrop is a function (g, W, H, t, layer, arg) painting in WORLD coordinates
 // (1080x1920 design space); the camera transform is applied by main.js.
+//   layer=false → sky, ground, buildings … everything behind the actors
+//   layer=true  → a prop's FRONT half, called again around the near actors
+//   layer="over"→ props that always sit in front of the hero (see story.FRONT_OVER)
+//   arg         → the story's FRONT object, e.g. { mode:"behind", car:{x,y,scale} }
+//
+// Prop kinds (each takes an object with x/y/scale/layer/img plus options):
+//   car    {x,y}        abandoned car, drawn in two halves for depth
+//   pole   {x,y,h}      bent street lamp + faint light pool
+//   trash  {x,y}        knocked-over bin that spills
+//   hydrant{x,y}        hydrant, dribbling water
+//   sign   {x,y,text}   store sign (diegetic text reads correctly)
+//   fence  {x,y}        rebar railing
+//   wall   {x,y,h}      graffiti wall strip
+// A prop always calls isFrontProp(o) and returns early when it doesn't match.
 
 const nightSky = (g, W, H, moonX = 640, moonY = 420) => {
   const grd = g.createLinearGradient(0, 0, 0, H);
@@ -11,6 +25,10 @@ const nightSky = (g, W, H, moonX = 640, moonY = 420) => {
   g.fillStyle = "#e8ecf2"; g.globalAlpha = 0.85;
   const stars = [[120, 260], [320, 180], [520, 320], [860, 240], [1010, 380], [220, 560], [760, 610], [980, 140], [60, 420], [430, 700]];
   for (const [x, y] of stars) { g.beginPath(); g.arc(x, y, 2.2, 0, 7); g.fill(); }
+  g.globalAlpha = 0.16; g.fillStyle = "#5b6b86";
+  for (const [cx2, cy2, w2, h2] of [[120, 150, 220, 34], [620, 90, 300, 40], [880, 260, 190, 28], [380, 330, 260, 30], [1020, 470, 240, 36]]) {
+    g.beginPath(); g.ellipse(cx2, cy2, w2, h2, 0, 0, 7); g.fill(); g.beginPath(); g.ellipse(cx2 + 70, cy2 + 16, w2 * 0.7, h2 * 0.7, 0, 0, 7); g.fill();
+  }
   g.globalAlpha = 1;
   g.beginPath(); g.arc(moonX, moonY, 78, 0, 7); g.fillStyle = "#e6e9ee"; g.fill();
   g.beginPath(); g.arc(moonX - 24, moonY - 18, 16, 0, 7); g.fillStyle = "#cdd3dc"; g.fill();
@@ -26,6 +44,185 @@ const skyline = (g, W, yBase, seedCol) => {
       if ((r * 7 + c * 13) % 5 < 2) { g.globalAlpha = 0.9; g.fillRect(x + 20 + c * 70, yBase - h + (y - 260) * 0.2 + 26 + r * 90, 26, 40); g.globalAlpha = 1; }
     }
   }
+};
+
+// ------------------------------------------------------------- props
+// Every prop is depth-split: back part (layer=false) + front part (layer=true),
+// so an actor whose soles sit behind the prop's ground line is occluded by its
+// front half — the real "standing behind the car" read.
+const fillP = (g, pts, col) => { g.fillStyle = col; g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const p of pts.slice(1)) g.lineTo(p[0], p[1]); g.closePath(); g.fill(); };
+const strokeP = (g, pts, w, col) => { g.strokeStyle = col; g.lineWidth = w; g.lineJoin = "round"; g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const p of pts.slice(1)) g.lineTo(p[0], p[1]); g.stroke(); };
+const rrectP = (x0, y0, x1, y1, r) => {
+  const a = Math.min(x0, x1), b = Math.min(y0, y1), c = Math.max(x0, x1), d = Math.max(y0, y1);
+  return [[a + r, b], [c - r, b], [c, b + r], [c, d - r], [c - r, d], [a + r, d], [a, d - r], [a, b + r]];
+};
+const ellP = (g, x, y, rx, ry, col) => { g.fillStyle = col; g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, 7); g.fill(); };
+
+/** Abandoned car, SIDE view, two depth halves. Ground line = o.y (tyre contact). */
+const carProp = (g, o) => {
+  const S = o.scale ?? 1, Wd = 470, Hh = 160;
+  g.save(); g.translate(o.x, o.y); g.scale(S, S);
+  const BODY = o.col || "#2a303a", DARK = "#151a21", EDGE = "#3a424e", GLASS = "#1b2430";
+  const body = [[10, -46], [26, -Hh], [110, -Hh - 14], [200, -Hh - 96], [360, -Hh - 98], [420, -Hh - 8], [Wd - 8, -Hh + 8], [Wd - 2, -60], [Wd - 14, -40], [10, -40]];
+  if (!isFrontProp(o)) {
+    g.save(); g.globalAlpha = 0.55; ellP(g, Wd / 2, 6, Wd * 0.56, 16, "#070a0e"); g.restore();
+    fillP(g, body, BODY);
+    fillP(g, [[150, -Hh - 10], [208, -Hh - 86], [352, -Hh - 88], [400, -Hh - 10]], GLASS);
+    strokeP(g, [[150, -Hh - 10], [208, -Hh - 86], [352, -Hh - 88], [400, -Hh - 10]], 5, EDGE);
+    fillP(g, [[280, -Hh - 84], [290, -Hh - 12], [396, -Hh + 4], [404, -Hh - 8]], GLASS);
+    ellP(g, 24, -100, 16, 12, "#6b2a22");
+    g.save(); g.globalAlpha = 0.30; ellP(g, 250, -124, 62, 10, "#5b3a2a"); g.restore();
+    // graffiti tag on the door (diegetic, reads right way up)
+    g.save(); g.translate(196, -104); g.rotate(-0.06); g.font = "900 46px Arial Black, Arial"; g.lineJoin = "round";
+    g.lineWidth = 9; g.strokeStyle = "#1a1d22"; g.strokeText("GG", 0, 0); g.fillStyle = "#f2b134"; g.fillText("GG", 0, 0); g.restore();
+  } else {
+    // front half: near rocker, wheels, seams, handle, bumper
+    fillP(g, [[12, -60], [Wd - 12, -60], [Wd - 14, -40], [10, -40]], DARK);
+    for (const wx of [96, 386]) {
+      g.fillStyle = "#0a0d11"; g.beginPath(); g.arc(wx, -30, 44, 0, 7); g.fill();
+      g.fillStyle = "#1d222a"; g.beginPath(); g.arc(wx, -30, 24, 0, 7); g.fill();
+      ellP(g, wx, -30, 9, 9, "#3a424e");
+      g.fillStyle = BODY; g.beginPath(); g.arc(wx, -30, 50, Math.PI * 1.08, Math.PI * 1.92); g.lineTo(wx + 50, -30); g.arc(wx, -30, 50, Math.PI * 1.92, Math.PI * 1.08, true); g.fill();
+    }
+    strokeP(g, [[166, -Hh + 2], [178, -48]], 4, DARK);
+    strokeP(g, [[330, -Hh + 4], [334, -48]], 4, DARK);
+    fillP(g, rrectP(236, -152, 290, -140, 5), EDGE);
+    fillP(g, rrectP(Wd - 22, -84, Wd + 6, -52, 6), EDGE);
+  }
+  g.restore();
+};
+
+/** Bent, dead street lamp: pole + drooping arm + faint flickering pool. */
+const poleProp = (g, o) => {
+  const S = o.scale ?? 1, H = o.h ?? 900;
+  if (!isFrontProp(o)) return;
+  g.save(); g.translate(o.x, o.y); g.scale(S, S);
+  strokeP(g, [[0, 0], [0, -H], [10, -H - 40], [64, -H - 70]], 22, "#2c323b");
+  strokeP(g, [[4, 0], [4, -H], [14, -H - 40], [66, -H - 68]], 7, "#4a525e");
+  fillP(g, rrectP(-22, -12, 22, 6, 6), "#232830");
+  fillP(g, rrectP(54, -H - 82, 104, -H - 66, 8), "#3a424e");
+  ellP(g, 79, -H - 66, 16, 7, "#7c8794");
+  g.save(); g.globalCompositeOperation = "lighter"; g.globalAlpha = 0.10 + 0.03 * Math.sin((o.t ?? 0) * 7);
+  const rg = g.createRadialGradient(79, -H - 60, 10, 79, -H - 60, 300);
+  rg.addColorStop(0, "#ffe7a8"); rg.addColorStop(1, "rgba(255,220,150,0)");
+  g.fillStyle = rg; g.beginPath(); g.arc(79, -H - 60, 300, 0, 7); g.fill(); g.restore();
+  g.restore();
+};
+
+/** Knocked-over bin + spilled bags. */
+const trashProp = (g, o) => {
+  const S = o.scale ?? 1;
+  if (!isFrontProp(o)) return;
+  g.save(); g.translate(o.x, o.y); g.scale(S, S);
+  g.save(); g.rotate(-0.24);
+  fillP(g, rrectP(-60, -86, 60, 0, 10), "#3a4a5a");
+  fillP(g, rrectP(-66, -96, 66, -78, 6), "#2b3846");
+  for (let i = -2; i <= 2; i++) strokeP(g, [[i * 22, -80], [i * 22, -6]], 4, "#2b3846");
+  g.restore();
+  ellP(g, 96, -18, 36, 20, "#20262e");
+  ellP(g, 140, -10, 22, 13, "#20262e");
+  fillP(g, [[-40, -8], [70, -2], [96, -18], [162, -12], [168, 2], [-42, 4]], "#2a3138");
+  g.restore();
+};
+
+/** Hydrant, dribbling. */
+const hydrantProp = (g, o) => {
+  const S = o.scale ?? 1;
+  if (!isFrontProp(o)) return;
+  g.save(); g.translate(o.x, o.y); g.scale(S, S);
+  fillP(g, rrectP(-26, -8, 26, 6, 4), "#4a1f1a");
+  fillP(g, rrectP(-30, -110, 30, -6, 12), "#a8322a");
+  fillP(g, rrectP(-40, -78, 40, -62, 6), "#b93a31");
+  ellP(g, 0, -116, 22, 12, "#b93a31");
+  fillP(g, rrectP(-12, -136, 12, -114, 5), "#d0554b");
+  g.save(); g.globalAlpha = 0.55; strokeP(g, [[-6, -118], [-14, -40], [-10, 0]], 8, "#7fb6d8"); g.restore();
+  ellP(g, 40, -2, 60, 9, "rgba(127,182,216,0.35)");
+  g.restore();
+};
+
+/** Store sign over a door: diegetic text, always upright. */
+const signProp = (g, o) => {
+  const S = o.scale ?? 1;
+  if (!isFrontProp(o)) return;
+  g.save(); g.translate(o.x, o.y); g.scale(S, S);
+  const w = o.w ?? 380, h = 92;
+  fillP(g, rrectP(-w / 2, -h, w / 2, 0, 8), o.bg || "#1f3b2e");
+  strokeP(g, [[-w / 2 + 6, -h + 6], [w / 2 - 6, -h + 6], [w / 2 - 6, -6], [-w / 2 + 6, -6], [-w / 2 + 6, -h + 6]], 4, "#0d1a14");
+  g.font = "900 54px Arial Black, Arial"; g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillStyle = o.col || "#e9d9a0"; g.fillText(o.text || "OPEN", 0, -h / 2 + 2);
+  g.restore();
+};
+
+/** Rebar railing: posts + two rails, depth-split. */
+const fenceProp = (g, o) => {
+  const S = o.scale ?? 1, w = (o.w ?? 300) * S;
+  g.save(); g.translate(o.x, o.y); g.scale(S, S);
+  const W = w / S;
+  if (!isFrontProp(o)) { strokeP(g, [[0, -56], [W, -50]], 6, "#3a4149"); strokeP(g, [[0, -88], [W, -82]], 5, "#333a42"); }
+  else {
+    for (let i = 0; i <= Math.round(W / 90); i++) {
+      const px = i * 90, lean = i % 2 ? 6 : -4;
+      strokeP(g, [[px, 0], [px + lean, -104]], 7, i % 2 ? "#4b535d" : "#414850");
+      ellP(g, px + lean, -104, 5, 5, "#5b636d");
+    }
+    strokeP(g, [[0, -96], [W, -90]], 6, "#4b535d");
+  }
+  g.restore();
+};
+
+/** Graffiti wall strip (brick + a tag). */
+const wallProp = (g, o) => {
+  const S = o.scale ?? 1, w = (o.w ?? 520), h = (o.h ?? 360);
+  if (isFrontProp(o)) return;
+  g.save(); g.translate(o.x, o.y); g.scale(S, S);
+  fillP(g, rrectP(0, -h, w, 0, 6), o.col || "#3b3f46");
+  for (let r = 0; r * 34 < h; r++) for (let c = 0; c * 76 < w; c++) {
+    const bx = c * 76 + (r % 2 ? 38 : 0), by = -h + r * 34;
+    strokeP(g, [[bx, by], [bx, by + 34], [bx + 76, by + 34]], 3, "#2c3037");
+  }
+  g.font = "900 62px Arial Black, Arial"; g.lineJoin = "round";
+  g.save(); g.translate(w * 0.34, -h * 0.55); g.rotate(-0.05);
+  g.lineWidth = 12; g.strokeStyle = "#1d2126"; g.strokeText(o.tag || "RUN", 0, 0);
+  g.fillStyle = o.tagCol || "#5bc8d8"; g.fillText(o.tag || "RUN", 0, 0); g.restore();
+  g.restore();
+};
+
+/** dispatch table: story FRONT objects use {kind: "car", x, y, scale, ...} */
+export const PROPS = { car: carProp, pole: poleProp, trash: trashProp, hydrant: hydrantProp, sign: signProp, fence: fenceProp, wall: wallProp };
+
+/** layer: 0 behind actors · 1 between horde and hero · 2 always over the hero */
+export function drawProps(g, list, layer) {
+  if (!list) return;
+  for (const o of list) {
+    if ((o.layer ?? 0) !== layer) continue;
+    const f = PROPS[o.kind]; if (!f) continue;
+    g.save(); f(g, o); g.restore();
+  }
+}
+
+// shambling infected-figure silhouette: stick-like limbs, hunched, arms out
+const zombieSil = (g, x, y, s, t) => {
+  const sw = Math.sin(t * 1.6) * 10;          // shambling sway
+  g.save();
+  g.translate(x, y); g.scale(s, s); g.rotate(sw * 0.004);
+  g.lineCap = "round"; g.lineJoin = "round"; g.strokeStyle = g.fillStyle;
+  // legs
+  g.lineWidth = 13;
+  g.beginPath(); g.moveTo(0, -150); g.lineTo(-16 + sw, -4); g.stroke();
+  g.beginPath(); g.moveTo(0, -150); g.lineTo(18 - sw, -2); g.stroke();
+  // torso (slight hunch)
+  g.lineWidth = 16;
+  g.beginPath(); g.moveTo(0, -150); g.lineTo(2, -320); g.stroke();
+  // arms reaching forward
+  g.lineWidth = 12; g.lineCap = "round";
+  g.beginPath(); g.moveTo(1, -300); g.lineTo(-46 - sw * 0.5, -250); g.stroke();
+  g.beginPath(); g.moveTo(1, -300); g.lineTo(44 + sw * 0.5, -262); g.stroke();
+  // head
+  g.beginPath(); g.ellipse(2, -352, 26, 30, 0, 0, 7); g.fill();
+  // open jaw notch
+  g.fillStyle = "#3a4048";
+  g.beginPath(); g.ellipse(2, -338, 9, 7, 0, 0, 7); g.fill();
+  g.restore();
 };
 
 export const BACKDROPS = {
@@ -122,41 +319,109 @@ export const BACKDROPS = {
     g.globalAlpha = 1;
   },
 
-  // ---------------- night street
-  street(g, W, H, t) {
-    nightSky(g, W, 900, 240, 330);
-    skyline(g, W, 880, "#10161f");
-    g.fillStyle = "#1a2029"; g.fillRect(-400, 880, W + 800, 1200);
-    g.strokeStyle = "#222b38"; g.lineWidth = 6;
-    for (let i = 0; i < 6; i++) { g.beginPath(); g.moveTo(-300 + i * 320, 900); g.lineTo(200 + i * 320, H + 400); g.stroke(); }
-    // abandoned car silhouette
-    g.fillStyle = "#0d1219"; g.fillRect(80, 1120, 420, 190);
-    g.beginPath(); g.moveTo(140, 1120); g.lineTo(220, 1000); g.lineTo(360, 1000); g.lineTo(430, 1120); g.closePath(); g.fill();
-    g.beginPath(); g.arc(190, 1320, 46, 0, 7); g.fill(); g.beginPath(); g.arc(390, 1320, 46, 0, 7); g.fill();
+  // ---------------- night street (props come from the story: FRONT)
+  // front.mode = "behind" hides the street's own car and the hero is placed
+  // behind the story car's front half; otherwise the street's car is drawn.
+  street(g, W, H, t, layer, front) {
+    const props = front && front.props;
+    if (!layer) {
+      nightSky(g, W, 900, 240, 330);
+      skyline(g, W, 880, "#10161f");
+      g.fillStyle = "#1d232d"; g.fillRect(-1200, 880, W + 3200, H + 2000);
+      g.strokeStyle = "#222b38"; g.lineWidth = 6;
+      for (let i = 0; i < 6; i++) { g.beginPath(); g.moveTo(-300 + i * 320, 900); g.lineTo(200 + i * 320, H + 400); g.stroke(); }
+      // kerb + road markings (foreshortened)
+      g.fillStyle = "#232a35"; g.fillRect(-400, 900, W + 800, 26);
+      g.save(); g.globalAlpha = 0.28; g.fillStyle = "#b9b39a";
+      for (let i = 0; i < 7; i++) { const y = 1200 + i * i * 30; g.fillRect(300 + i * (120 - i * 9), y, 260 - i * 16, 16); }
+      g.restore();
+      // road debris that has blown in
+      g.fillStyle = "#141a22";
+      for (const [dx, dy, w2, h2] of [[120, 1180, 60, 15], [860, 1240, 40, 12], [640, 1010, 70, 14], [980, 1460, 54, 12]]) g.fillRect(dx, dy, w2, h2);
+      // default horde silhouettes (only when the story sends no actors)
+      if (!(front && front.horde)) {
+        g.fillStyle = "#0b1017";
+        const horde = [[820, 1340, 1.00, 0.0], [980, 1360, 1.10, 0.7], [640, 1370, 1.15, 2.1], [760, 1420, 1.35, 0.4], [1050, 1440, 1.30, 1.1]];
+        for (const [hx, hy, hs, ph] of horde) zombieSil(g, hx, hy, hs, t + ph);
+      }
+      // default abandoned car (the story's car replaces it when present)
+      if (!(front && front.noCar)) {
+        g.fillStyle = "#0d1219"; g.fillRect(80, 1120, 420, 190);
+        g.beginPath(); g.moveTo(140, 1120); g.lineTo(220, 1000); g.lineTo(360, 1000); g.lineTo(430, 1120); g.closePath(); g.fill();
+        g.beginPath(); g.arc(190, 1320, 46, 0, 7); g.fill(); g.beginPath(); g.arc(390, 1320, 46, 0, 7); g.fill();
+      }
+      drawProps(g, props, 0);
+    } else if (layer === true) {
+      drawProps(g, props, 1);
+    } else if (layer === "over") {
+      drawProps(g, props, 2);
+    }
+  },
+
+  // ---------------- rooftop alley: hero crouched behind a car / AC unit
+  alley(g, W, H, t, layer, front) {
+    const props = front && front.props;
+    if (!layer) {
+      g.fillStyle = "#100e0c"; g.fillRect(-400, -400, W + 800, H + 800);
+      // brick wall of the building opposite
+      g.fillStyle = "#2a2320"; g.fillRect(-400, -400, W + 800, 1180);
+      for (let r = 0; r < 16; r++) for (let c = -2; c < 14; c++) {
+        const bx = -380 + c * 92 + (r % 2 ? 46 : 0), by = -380 + r * 96;
+        g.strokeStyle = "#1b1614"; g.lineWidth = 4; g.strokeRect(bx, by, 92, 96);
+      }
+      // fire escape (left) — the background moves as the camera moves
+      g.strokeStyle = "#121110"; g.lineWidth = 10;
+      for (let i = 0; i < 4; i++) { g.beginPath(); g.moveTo(-20, 120 + i * 300); g.lineTo(330, 120 + i * 300); g.stroke(); g.beginPath(); g.moveTo(330, 120 + i * 300); g.lineTo(360, 420 + i * 300); g.stroke(); }
+      for (let i = 0; i < 12; i++) { g.beginPath(); g.moveTo(-10 + i * 30, 60); g.lineTo(-10 + i * 30, 900); g.stroke(); }
+      // wet asphalt
+      g.fillStyle = "#171a1e"; g.fillRect(-400, 1180, W + 800, 900);
+      g.save(); g.globalAlpha = 0.18; g.fillStyle = "#5c6f86";
+      for (let i = 0; i < 6; i++) { g.beginPath(); g.ellipse(120 + i * 210, 1300 + (i % 3) * 140, 120, 26, 0, 0, 7); g.fill(); }
+      g.restore();
+      drawProps(g, props, 0);
+    } else if (layer === true) drawProps(g, props, 1);
+    else if (layer === "over") drawProps(g, props, 2);
   },
 
   // ---------------- rooftop
-  rooftop(g, W, H, t) {
-    nightSky(g, W, 760, 300, 300);
-    skyline(g, W, 760, "#131a26");
-    g.fillStyle = "#3a3d42"; g.fillRect(-400, 760, W + 800, 1300);        // roof slab
-    g.fillStyle = "#31343a"; g.fillRect(-400, 760, W + 800, 40);
-    g.strokeStyle = "#2b2e33"; g.lineWidth = 5;
-    for (let i = 0; i < 10; i++) { g.beginPath(); g.moveTo(-300 + i * 220, 800); g.lineTo(100 + i * 220, H + 400); g.stroke(); }
-    // parapet
-    g.fillStyle = "#44474d"; g.fillRect(-400, 560, W + 800, 220);
-    // water tank
-    g.fillStyle = "#3d5a75"; g.fillRect(1120, 180, 240, 460);
-    g.fillStyle = "#2c4257"; g.fillRect(1120, 180, 60, 460);
-    g.fillStyle = "#26292e"; g.fillRect(1080, 620, 320, 60);
+  rooftop(g, W, H, t, layer, front) {
+    const props = front && front.props;
+    if (!layer) {
+      nightSky(g, W, 760, 300, 300);
+      skyline(g, W, 760, "#131a26");
+      g.fillStyle = "#3a3d42"; g.fillRect(-400, 760, W + 800, 1300);        // roof slab
+      g.fillStyle = "#31343a"; g.fillRect(-400, 760, W + 800, 40);
+      g.strokeStyle = "#2b2e33"; g.lineWidth = 5;
+      for (let i = 0; i < 10; i++) { g.beginPath(); g.moveTo(-300 + i * 220, 800); g.lineTo(100 + i * 220, H + 400); g.stroke(); }
+      // parapet
+      g.fillStyle = "#44474d"; g.fillRect(-400, 560, W + 800, 220);
+      // water tank
+      g.fillStyle = "#3d5a75"; g.fillRect(1120, 180, 240, 460);
+      g.fillStyle = "#2c4257"; g.fillRect(1120, 180, 60, 460);
+      g.fillStyle = "#26292e"; g.fillRect(1080, 620, 320, 60);
+      drawProps(g, props, 0);
+    } else if (layer === true) drawProps(g, props, 1);
+    else if (layer === "over") drawProps(g, props, 2);
   },
 };
 
+// ------------------------------------------------------------- depth test
+const FRONT_KINDS = new Set(["car", "pole", "fence", "sign", "trash", "hydrant"]);
+/** true → this call paints the prop's front half (closer to the lens than 0). */
+export const isFrontProp = (o) => FRONT_KINDS.has(o.kind) && o.back !== true;
+
 // ------------------------------------------------------------- fx layers
 export const FX = {
-  dust(g, W, H, k, col = "#e8dcc4") {
-    g.save(); g.globalAlpha = Math.max(0, 1 - k * k) * 0.8;
-    for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2, r = 130 + 220 * k; g.beginPath(); g.ellipse(540 + Math.cos(a) * r, 900 + Math.sin(a) * r * 0.55, 150 + 70 * k, 120 + 60 * k, 0, 0, 7); g.fillStyle = col; g.fill(); }
+  dust(g, W, H, k, col = "#cdbfa6") {
+    // small puffs kicked up around the feet (k = 0..1 spread) — never covers the actor
+    g.save()
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + k * 2;
+      const r = 70 + 150 * k + (i % 3) * 22;
+      g.globalAlpha = Math.max(0, 0.30 * (1 - k)) ;
+      g.fillStyle = col;
+      g.beginPath(); g.ellipse(540 + Math.cos(a) * r, 1688 + Math.sin(a) * r * 0.22, 44 + 36 * k, 22 + 16 * k, 0, 0, 7); g.fill();
+    }
     g.restore();
   },
   rain(g, W, H, t, k = 1) {
@@ -178,4 +443,68 @@ export const FX = {
     g.fillStyle = rg; g.fillRect(0, 0, W, H);
   },
   flash(g, W, H, k) { g.save(); g.globalAlpha = k; g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H); g.restore(); },
+
+  /** Ambient drift BELOW the actors: dust motes + burning ash of the fallen city. */
+  embers(g, W, H, t, k = 1) {
+    g.save();
+    for (let i = 0; i < 46; i++) {
+      const sp = 40 + (i % 7) * 18;
+      const x = ((i * 271 + t * sp * 1.6) % (W + 400)) - 200;
+      const y = ((i * 419 + H) - t * sp) % (H + 300) - 150;
+      const a = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(t * 3 + i));
+      g.globalAlpha = a * k; g.fillStyle = i % 3 ? "#e0953a" : "#f2d27a";
+      const r = 1.6 + (i % 4) * 0.9;
+      g.beginPath(); g.arc(x + Math.sin(t * 1.3 + i) * 12, y, r, 0, 7); g.fill();
+    }
+    // a few slow smoke wisps in the background
+    g.globalAlpha = 0.10 * k; g.fillStyle = "#8d96a3";
+    for (let i = 0; i < 5; i++) {
+      const bx = 120 + i * 230, by = 900 - ((t * 40 + i * 120) % 700);
+      g.beginPath(); g.ellipse(bx + Math.sin(t * 0.7 + i) * 30, by, 90, 46, 0, 0, 7); g.fill();
+    }
+    g.restore();
+  },
+
+  /** Scorched paper scraps blown across the frame (always crossing L→R). */
+  paper(g, W, H, t, k = 1) {
+    g.save();
+    for (let i = 0; i < 10; i++) {
+      const sp = 260 + (i % 4) * 90;
+      const x = ((i * 397 + t * sp) % (W + 500)) - 250;
+      const y = 700 + ((i * 211) % 900) + Math.sin(t * 2 + i) * 30;
+      const rot = t * (2 + (i % 3)) + i;
+      g.save(); g.translate(x, y); g.rotate(rot); g.scale(1, 0.35 + 0.65 * Math.abs(Math.cos(t * 3 + i)));
+      g.globalAlpha = 0.75 * k; g.fillStyle = i % 2 ? "#cfc6ae" : "#a89c80";
+      g.fillRect(-14, -9, 28, 18);
+      g.fillStyle = "#6b5f48"; g.fillRect(-10, -4, 14, 2); g.fillRect(-10, 1, 10, 2);
+      g.restore();
+    }
+    g.restore();
+  },
+
+  /** Radial speed lines from the frame centre (sprint / whip-pan). */
+  speed(g, W, H, t, k = 1, dir = 1) {
+    g.save(); g.globalAlpha = 0.30 * k; g.strokeStyle = "#dbe6f2"; g.lineCap = "round";
+    const cx = W / 2, cy = H * 0.46;
+    for (let i = 0; i < 26; i++) {
+      const a = (i / 26) * Math.PI * 2 + Math.sin(i * 3.1) * 0.05;
+      const r0 = 420 + ((i * 97 + t * 2600 * dir) % 700);
+      const r1 = r0 + 130 + (i % 4) * 60;
+      g.lineWidth = 2 + (i % 3);
+      g.beginPath(); g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0 * 1.25); g.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1 * 1.25); g.stroke();
+    }
+    g.restore();
+  },
+
+  /** Screen-space grade: { tint:"#rrggbb", a:0..1, desat:0..1, mode:"multiply|screen" }. */
+  grade(g, W, H, gr) {
+    g.save();
+    if (gr.desat) {
+      g.globalCompositeOperation = "saturation"; g.globalAlpha = gr.desat; g.fillStyle = "#808080";
+      g.fillRect(0, 0, W, H);
+    }
+    g.globalCompositeOperation = gr.mode || "multiply";
+    g.globalAlpha = gr.a ?? 0.2; g.fillStyle = gr.tint || "#ff8a6a"; g.fillRect(0, 0, W, H);
+    g.restore();
+  },
 };

@@ -27,6 +27,8 @@ def gated_rms(v, hop=0.05, gate_rel=-26):
     keep = rms[rms > thr]
     return float(np.sqrt((keep ** 2).mean()))
 
+def rms(x): return float(np.sqrt(np.mean(np.square(x.astype(np.float64)))))
+
 def db(x): return 20 * np.log10(max(x, 1e-12))
 
 def main():

@@ -1,0 +1,15 @@
+# --- stickman-short working tree ---------------------------------------------
+# Build intermediates (the delivered artefact lives in stickman-short/out/)
+stickman-short/frames/
+stickman-short/stills/
+stickman-short/review/
+# audio stems: reproducible from voice.mp3 + audio.py + tools/mix.py
+stickman-short/mix_raw.wav
+stickman-short/mix.wav
+stickman-short/music.wav
+stickman-short/sfx.wav
+# tooling / scratch
+stickman-short/node_modules/
+work/
+*.log
+script.txt

@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>kit</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
+<body><canvas id="c" width="1080" height="1920"></canvas>
+<script type="module">
+import { drawStick } from "./stickman.js";
+import { BACKDROPS } from "./world2d.js";
+const cv = document.getElementById("c"), g = cv.getContext("2d");
+// each test case: [{ pose, props, opts }] rendered side by side at 2-up zoom
+const CASES = [
+  { opts: { expr: "happy", L: "hang", R: "pull", step: 0.35, run: 1, gear: ["backpack"], props: { phone: { hand: "R", rot: -12, glow: 1 } } } },
+  { opts: { expr: "happy", L: "hang", R: "pull", step: 0.5, run: 1, gear: ["backpack"], props: { phone: { hand: "R", rot: -12, glow: 1 }, bandage: { x: 1 } } } },
+  { opts: { expr: "angry", L: "hang", R: "pull", step: 0.6, run: 1, gear: ["backpack"], props: { bandage: { x: 1 } }, bloodFx: { on: true, k: 0.9, t: 1.7, seed: 2, hand: [0, 0], drips: 5, pool: 0.7 } } },
+  { opts: { zombie: true, expr: "angry", L: "reach", R: "reach", step: 0.4, run: 1, props: { bloodFx: { on: true, k: 0.7, t: 1.1, seed: 5, drips: 3, pool: 0.4 } } } },
+  { opts: { expr: "happy", L: "hang", R: "paper", step: 0.3, run: 1, gear: ["backpack"], props: { phone: { hand: "L", rot: 8, glow: 0 } } } },
+  { opts: { expr: "scared", L: "open", R: "hip", step: 0.4, run: 1, gear: ["backpack"], props: { bandage: { x: 1 }, phone: { hand: "L", rot: 10, glow: 1 } } } },
+];
+window.renderFrame = (i) => {
+  g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 1080, 1920);
+  BACKDROPS.street(g, 1080, 1920, 0.5, false, { noCar: true });
+  const cse = CASES[i % CASES.length];
+  g.save(); g.translate(540 - 300, 1860 - 975); g.scale(1, 1);
+  drawStick(g, Object.assign({ expr: "neutral", facing: 0, seed: 3, step: 0, run: 0, bob: 0, blink: 0, look: 0.2, L: "hang", R: "hang", cone: 0 }, cse.opts));
+  g.restore();
+};
+window.ready = true;
+</script></body></html>
