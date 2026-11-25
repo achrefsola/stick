@@ -65,6 +65,7 @@ function renderFrame(f) {
       run: a.run ?? 0, tilt: a.tilt ?? 0, headTilt: a.headTilt ?? 0, bob: a.bob ?? 0,
       gear: a.gear ?? null, cone: a.cone ?? 0,
       props: a.props ?? null, bloodFx: a.bloodFx ?? null, zombie: a.zombie ?? false,
+      viseme: a.viseme ?? null,
     });
     g.restore();
   };
@@ -83,14 +84,19 @@ function renderFrame(f) {
     if (fx.kind === "embers") FX.embers(g, W, H, T, fx.k ?? 1);
     if (fx.kind === "paper") FX.paper(g, W, H, T, fx.k ?? 1);
     if (fx.kind === "speed") FX.speed(g, W, H, T, fx.k ?? 1, fx.dir ?? 1);
+    if (fx.kind === "dustmotes") FX.dustmotes(g, W, H, T, fx.k ?? 1);
+    if (fx.kind === "safelight") FX.safelight(g, W, H, T, fx.k ?? 1);
+    if (fx.kind === "grit") FX.grit(g, W, H, T, fx.k ?? 1);
+    if (fx.kind === "tint") FX.tint(g, W, H, fx.a ?? 0.3);
   }
 
   g.restore();
 
   // post: grade (slow-mo / punch tint), vignette + grain
   if (story.gradeAt) { const gr = story.gradeAt(f); if (gr) FX.grade(g, W, H, gr); }
-  FX.vignette(g, W, H);
-  FX.grain(g, W, H, f);
+  const inSafe = shot.kind === "safe";
+  FX.vignette(g, W, H, inSafe ? 0.26 : 1);          // the safe room breathes: softer corners
+  if (!inSafe) FX.grain(g, W, H, f);
 
   // captions (only when the story defines them — off by default)
   if (story.CAPTIONS) {

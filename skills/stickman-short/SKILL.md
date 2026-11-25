@@ -60,16 +60,21 @@ The twist gets a sting (music stops, low hit, push-in). The last visual lands on
 ### 4.4 The cast — ONE character, locked
 `engine/stickman.js` is the source of truth; **do not create other characters**. Key API:
 ```js
-drawStick(g, { expr, blink, look, facing, L, R, step, run, tilt, headTilt, bob, gear, cone })
+drawStick(g, { expr, blink, look, facing, L, R, step, run, tilt, headTilt, bob, gear, cone, viseme })
 ```
 - **views** (`facing`): 0 front · ±0.45 three-quarter · ±1 side · 2 back
-- **expressions** (`expr`): neutral happy angry surprised scared sad tired thinking
-- **poses** (`L`/`R`): hang walksw point up explore climb reach pull hip chin cross open
+- **expressions** (`expr`): neutral happy angry surprised scared sad tired thinking relieved
+- **poses** (`L`/`R`): hang walksw point up explore climb reach pull hip chin cross open +
+  road / roadpoint / roadreach (running swings) + chest / lean / kayak (the safe room)
 - **gear** (`gear`): "backpack" | "flashlight" | "notebook" | "bottle" (array = several);
   `cone` 0–1 lights the flashlight beam
 - **palette** (SM): cap #b23330, hair #5b4232, face #ffffff, body #151313, shoes #f6f4ef
 - geometry: 600×1000 design canvas, soles y=975; actors anchor at (cx=300, soles)
 - the main.js actor transform maps design (300, 975) → the actor's (x, y) at `scale`
+- **lip-sync** (`viseme`): `{viseme:"open|wide|round|teeth|close", open:0..1}` replaces ONLY the
+  mouth; the eyes/brows keep the feeling from `expr`. `null` = silent, expression mouth
+  (smile / frown / o / wavy …) shows instead. Body poses follow a `feel` too, so a scared
+  sprint still mouths the words without losing the fear.
 To restyle anything, edit `engine/stickman.js` only — keep the reference sheet as truth.
 
 ### 4.5 Story (`web/story.js`)
@@ -77,6 +82,18 @@ Rewrite `template/story.js`: `SHOTS` (n, backdrop, cam {x,y,z}, ease), `camAt(f)
 `actorsAt(f,T)` (poses/expr per beat, poses lead their word by 0–3 frames), `fxAt(f,T)`
 (dust/rain/flash), optional `CAPTIONS`/`TAG`. Backdrops: room · door · hallway · stairs ·
 street · rooftop (extend `engine/world2d.js` in the same flat style).
+
+### 4.5b Timing = the transcript, and the picture must match it
+Transcribe `voice.mp3` with word timestamps (whisper) into a `PHRASES` table of
+`[text, startFrame, endFrame]`. Everything else is derived from it:
+- **cuts** land on the word that motivates them; reactions land 1–2 frames BEFORE it;
+- **mouth**: letters of each phrase become timed visemes (`open/wide/round/teeth/close`),
+  spaces become short silent gaps so the lips close between words;
+- **the action follows the words**: "my arm is bleeding" → the blood appears ON "bleeding"
+  (with a heartbeat pulse + red pulse), never earlier; "I think we're safe" → the shot
+  changes to the safe place 1 frame before "we're".
+Never invent a beat the voice does not say: if the audio says a quieter line (e.g. a calm
+aside at −12 dB), give it its own calmer shot instead of reusing the chase staging.
 
 ### 4.6 Look check (before the full render)
 `WEB=<proj>/web node tools/render.mjs stills/a "0,45,90,..."` then

@@ -62,6 +62,20 @@ def heartbeat(dur=0.5):
     b = np.sin(2 * np.pi * 54 * (t - 0.22)) * np.exp(-np.maximum(0, t - 0.22) * 22) * (t > 0.22)
     return ((a + b) * 0.9).astype(np.float32)
 
+def door_slam(dur=0.7):
+    t = np.arange(int(dur * SR)) / SR
+    body = np.sin(2 * np.pi * 62 * t) * np.exp(-t * 9) * 1.0
+    thud = lp_fast(rng.standard_normal(int(dur * SR)), 260) * np.exp(-t * 14) * 1.2
+    rattle = lp_fast(rng.standard_normal(int(dur * SR)), 2400) * np.exp(-t * 5) * 0.25
+    return (body + thud + rattle).astype(np.float32)
+
+def safetone(dur=1.6):
+    t = np.arange(int(dur * SR)) / SR
+    e = np.minimum(1, t / 0.25) * np.minimum(1, (dur - t) / 0.6)
+    v = (np.sin(2 * np.pi * 196 * t) + 0.5 * np.sin(2 * np.pi * 294 * t) +
+         0.3 * np.sin(2 * np.pi * 392 * t + 0.4)) / 1.8
+    return (v * e * 0.8).astype(np.float32)
+
 # ---------------- music bed: low tension drone + sparse pulse, hard-stops for the punchline
 music = np.zeros(N, np.float32)
 t_all = np.arange(N) / SR
@@ -73,36 +87,50 @@ for b in np.arange(7.1, 12.2, 1.3):                 # chase stabs
 for b in np.arange(2.0, 6.9, 1.15):                 # comic staccato
     place(music, hit(0.16), b, 0.10)
 music[int(26.2 * SR):] = 0.0                        # sudden silence before the punchline
+music[int(15.75 * SR):int(17.45 * SR)] *= 0.12       # the safe room: the score hushes but stays warm
 
 # ---------------- sfx cues (one line per event, t in seconds)
+# word times: whisper transcript of voice.mp3 — "bleeding" 21.84, "safe" 16.95,
+# "zombies" 1.42, "Run, run, run!" 14.30-15.28, "Oh no!" 12.39
 sfx = np.zeros(N, np.float32)
 place(sfx, whoosh(0.6), 0.0, 0.5)
-for s in [0.15, 0.42, 0.70, 0.98, 1.26, 1.55]:
-    place(sfx, step(), s, 0.5)
-place(sfx, growl(1.0, 66), 0.35, 0.45)
-place(sfx, growl(0.9, 60), 1.10, 0.35)
-place(sfx, phone_beep(), 0.30, 0.35)
-for s in [2.10, 2.75, 3.40, 4.05, 4.70, 5.40, 6.10, 6.75]:
-    place(sfx, step(), s, 0.35)
+for s_ in [0.15, 0.42, 0.70, 0.98, 1.26]:
+    place(sfx, step(), s_, 0.55)
+place(sfx, growl(1.0, 66), 1.42, 0.50)          # "…zombies!"
 place(sfx, phone_beep(), 2.05, 0.22)
+# --- the chase: 7.13-15.3 (exploring .. run, run, run)
+for s_ in np.arange(7.2, 15.3, 0.24):
+    place(sfx, step(), s_, 0.55)
 place(sfx, hit(), 7.13, 0.7)
-for s in np.arange(7.2, 12.2, 0.26):
-    place(sfx, step(), s, 0.55)
 place(sfx, growl(1.1, 74), 7.5, 0.7)
 place(sfx, growl(1.0, 68), 9.2, 0.65)
 place(sfx, growl(1.2, 72), 11.0, 0.7)
 place(sfx, whoosh(0.5), 10.7, 0.5)
-place(sfx, hit(), 12.39, 0.6)
+place(sfx, hit(), 12.39, 0.6)                    # "Oh no!"
 place(sfx, heartbeat(), 12.6, 0.55)
 place(sfx, heartbeat(), 13.3, 0.40)
-place(sfx, growl(0.8, 58), 14.0, 0.30)
-place(sfx, phone_beep(), 15.82, 0.4)
-place(sfx, hit(0.14), 16.57, 0.22)
-place(sfx, phone_beep(), 19.7, 0.2)
-place(sfx, growl(1.4, 52), 21.1, 0.45)
-place(sfx, heartbeat(), 23.0, 0.5)
-place(sfx, hit(), 23.91, 0.4)
-place(sfx, whoosh(0.7), 25.9, 0.5)
+place(sfx, growl(1.4, 58), 14.30, 0.55)          # "Run, run, run!"
+place(sfx, whoosh(0.6), 14.34, 0.45)
+# --- THE SAFE ROOM: 15.83-17.3. Door slams behind him, everything else goes quiet.
+place(sfx, door_slam(), 15.80, 0.85)
+place(sfx, safetone(1.6), 16.30, 0.30)           # a soft reassuring pad
+place(sfx, step(), 16.60, 0.18)
+# --- back out into the street
+place(sfx, whoosh(0.5), 17.76, 0.45)
+for s_ in [18.1, 18.6, 19.1, 19.6]:
+    place(sfx, step(), s_, 0.35)
+place(sfx, growl(1.2, 60), 18.9, 0.35)
+# --- arm check: the sting lands ON "bleeding" (21.84), then a heartbeat under it
+place(sfx, growl(0.9, 56), 21.06, 0.30)          # "Why is my arm…" — uneasy
+place(sfx, hit(), 21.84, 0.55)                   # "…bleeding"
+place(sfx, heartbeat(), 21.92, 0.55)
+place(sfx, heartbeat(), 22.55, 0.45)
+place(sfx, heartbeat(), 23.18, 0.35)
+# --- the punchline + outro
+place(sfx, hit(), 23.91, 0.35)
+place(sfx, heartbeat(), 24.55, 0.3)
+place(sfx, whoosh(0.7), 25.86, 0.5)
+place(sfx, phone_beep(), 26.20, 0.3)
 
 for name, buf in (("music.wav", music), ("sfx.wav", sfx)):
     buf = buf / max(1e-9, np.abs(buf).max()) * 0.9

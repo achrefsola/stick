@@ -9,64 +9,163 @@
 //  - props are depth-split (car / pole / bin), so the hero can stand BEHIND a car
 //  - the phone and the blood are part of the character draw: the selfie rig, the
 //    duct-tape bite, drips off the hand, a trail and a puddle on the ground
-// Word frames come from work/words.json (30 fps): every cut lands on a new beat.
+// Word frames come from the transcript of voice.mp3 (30 fps, whisper word
+// timestamps) — see WORD_BEATS. Every cut and every reaction lands on the word
+// it belongs to, and the mouth is driven by the same table (voiceAt).
 
 const lerp = (a, b, k) => a + (b - a) * Math.max(0, Math.min(1, k));
 const clamp01 = (k) => Math.max(0, Math.min(1, k));
 const smooth = (k) => { k = clamp01(k); return k * k * (3 - 2 * k); };
 const hash = (i) => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
 
-// ---------------------------------------------------------------- word marks
+// ---------------------------------------------------------------- mouth / lip-sync
+// viseme: open (jaw) · wide · round · teeth · close (lips part) · none (silent)
+const VOWEL = { a: "open", e: "wide", i: "wide", o: "round", u: "round", y: "wide" };
+const CONS = "bmpfvwhlrz".split("");
+/** frames of a mouth shape for one spoken letter, then a closing dip */
+function shapeFor(ch, hold = 2) {
+  if (VOWEL[ch]) return { viseme: VOWEL[ch], open: 0.85, hold };
+  if (ch === "s" || ch === "t" || ch === "k" || ch === "c" || ch === "g" || ch === "j") return { viseme: "teeth", open: 0.35, hold: Math.max(1, hold - 1) };
+  if (CONS.includes(ch)) return { viseme: "close", open: 0.15, hold: Math.max(1, hold - 1) };
+  return null;
+}
+/** Letters of one spoken phrase -> timed silent gaps + timed mouth shapes. */
+function lipOf(phr, a, b) {
+  const letters = phr.toLowerCase().replace(/[^a-z ']/g, "").split("");
+  const slots = letters.map((ch, i) => ({ ch, f: a + (i / letters.length) * (b - a) }));
+  // gaps = whitespace only (a word's letters run together); apostrophes are seams inside a word
+  const gaps = [], shapes = [];
+  const span = b - a;
+  for (const sl of slots) {
+    if (sl.ch === " ") gaps.push([sl.f, sl.f + span / letters.length]);
+    else if (sl.ch === "'") shapes.push({ f: sl.f, viseme: "close", open: 0.15 });
+    else { const sh = shapeFor(sl.ch); if (sh) shapes.push({ f: sl.f, ...sh }); }
+  }
+  // squeeze the gap of a word that is shorter than a blink so it never eats the word
+  const shaped = gaps.filter(([x, y]) => y - x > 1.4);
+  return { gaps: shaped, shapes };
+}
+
+// ---------------------------------------------------------------- word beats
+// Every spoken phrase of voice.mp3 with its real start/end frame (transcript +
+// word timestamps, 30 fps). The mouth reads the letters in between; a reaction
+// always lands 1–2 frames BEFORE the word that causes it.
+const PHRASES = [
+  ["I'm being chased by zombies!", 0, 50],
+  ["And this video is getting zero views?!", 60, 125],
+  ["What's up guys?", 141, 165],
+  ["Welcome back to my channel.", 170, 203],
+  ["Today, we're exploring the city during the zombie apocalypse!", 214, 311],
+  ["Don't forget to like and subscribe!", 322, 364],
+  ["Oh no!", 372, 387],
+  ["They're getting closer!", 394, 422],
+  ["Run, run, run!", 429, 458],
+  ["Okay.", 475, 483],
+  ["I think we're safe.", 497, 518],
+  ["Anyway guys, follow for part two!", 533, 588],
+  ["Why is my arm bleeding?", 632, 667],
+  ["Yes, I'm the content now.", 717, 755],
+  ["Like and subscribe.", 776, 805],
+];
+const SCORE = PHRASES.map(([p, a, b]) => ({ p, a, b, ...lipOf(p, a, b) }));
+const inGap = (arr, f) => arr.some(([x, y]) => f >= x && f < y);
+/** mouth for frame f: silent when no phrase is being spoken or inside a word gap */
+function mouthAt(f) {
+  for (const sc of SCORE) {
+    if (f < sc.a || f >= sc.b) continue;
+    if (inGap(sc.gaps, f)) return null;
+    let cur = null;
+    for (const sh of sc.shapes) { if (sh.f <= f) cur = sh; else break; }
+    return cur;
+  }
+  return null;
+}
+// word table: name -> [start, end] in frames
+const WORDS = {};
+for (const [phr, a, b] of PHRASES) {
+  const ws = phr.toLowerCase().replace(/[^a-z' ]/g, "").split(/\s+/).filter(Boolean);
+  const total = ws.reduce((n, w) => n + w.length, 0);
+  let acc = a;
+  for (const w of ws) { const n = (w.length / total) * (b - a); WORDS[w] = [Math.round(acc), Math.round(acc + n)]; acc += n; }
+}
+const W = (w) => WORDS[w] || [0, 0];
+const STRESS = {
+  zombies: W("zombies"), views: W("views"), run: W("run"), safe: W("safe"),
+  bleeding: W("bleeding"), content: W("content"), subscribe: W("subscribe"),
+};
 const M = {
-  hook: 0, hey: 42, crew: 72, vlog: 122, today: 122, exploring: 140, cardio: 186,
-  whoa: 203, detour: 218, fans: 226, little: 249, enthu: 259, just: 276, evasive: 293,
-  folks: 318, prepared: 330, spontaneous: 341, crowd: 350, alright: 372, behind: 387,
-  inconspic: 408, vehicle: 443, back: 478, resource: 505, prime: 540, temporary: 562,
-  studio: 576, youknow: 607, thiswhole: 632, perspective: 640, also: 693, ideas: 740,
-  what: 776, audience: 786, piece: 799, you: 803,
+  hook: 0,
+  iam: W("i'm")[0],                         // "I'm being chased…"
+  views: STRESS.views[0],                   // the number complaint
+  wsup: W("up")[0],                     // "What's up guys?"
+  back: W("back")[0],
+  exploring: W("exploring")[0],             // the lane reveal
+  zombie: W("zombie")[0],
+  apoc: W("apocalypse")[0],
+  like: W("like")[0],
+  oh: W("oh")[0],
+  closer: W("closer")[0],
+  run: STRESS.run[0],                       // "Run, run, run!"
+  okay: W("okay")[0],
+  think: W("think")[0],
+  safe: STRESS.safe[0],                     // "safe" — THE safe place
+  anyway: W("anyway")[0],
+  part: W("part")[0],
+  why: W("why")[0],
+  arm: W("arm")[0],                         // "my arm"
+  bleeding: STRESS.bleeding[0],             // "bleeding" — THE blood
+  yes: W("yes")[0],
+  content: STRESS.content[0],
+  also: W("also")[0],
+};
+const BEAT = {
+  ...M,
+  armWord: W("arm")[0],
+  bloodWord: STRESS.bleeding[0],
+  safeWord: STRESS.safe[0],
+  beats: Object.keys(STRESS).map((k) => ({ name: k, at: STRESS[k][0], end: STRESS[k][1] })),
 };
 
 const RUN = 17;            // world px/frame for a full sprint
+// The safe-place shot: speech drops ~12 dB on "Okay. / I think we're safe." —
+// the cut and the room swap happen on "I think", 1 frame before "we're".
+const SAFE_SHOT_AT = 496;   // "…we're safe." starts at 508; lands on "I think we're"
 const HERO_GROUND = 1588;  // hero soles in the street
 const TOTAL = 815;
 // ---------------------------------------------------------------- shots
 // start = first frame of the shot (word-anchored). n is derived, so the cut
 // always lands on the word it belongs to (no picture/voice drift).
 const SHOT_DEFS = [
-  { start: 0,   kind: "hook",      follow: RUN,          move: { z: [1.55, 1.34], y: [1186, 1196], dy: [6, 16], shake: 8 } },
-  { start: 42,  kind: "hey",       follow: 0,            move: { z: [1.36, 1.3],  y: [1196, 1188], dy: [0, -6], shake: 3 } },
-  { start: 78,  kind: "vlog",      follow: RUN,          move: { z: [1.18, 1.15], y: [1252, 1262], dy: [0, 8], shake: 3 } },
-  { start: 122, kind: "exploring", follow: 0,            move: { z: [1.2, 1.14],  y: [1244, 1232], dy: [0, 6], shake: 2.5 } },
-  { start: 169, kind: "cardio",    follow: 0,            move: { z: [1.24, 1.34], y: [1202, 1188], dy: [-2, 2], shake: 5 } },
-  { start: 193, kind: "whoa",      follow: 0, whip: 3,   move: { z: [1.5, 1.66],  y: [1172, 1158], dy: [0, 4], shake: 10 } },
-  { start: 200, kind: "detour",    follow: 0,            move: { z: [1.5, 1.26],  y: [1178, 1196], dy: [0, 6], shake: 12 } },
-  { start: 244, kind: "fans",      follow: 0,            move: { z: [1.24, 1.3],  y: [1192, 1184], dy: [0, 2], shake: 5 } },
-  { start: 288, kind: "legs",      follow: 0,            move: { z: [1.06, 1.1],  y: [1448, 1440], dy: [0, 0], shake: 5 } },
-  { start: 344, kind: "evasive",   follow: 0,            move: { z: [1.32, 1.62], y: [1198, 1152], dy: [0, 4], shake: 8 } },
-  { start: 379, kind: "folks",     follow: 0,            move: { z: [1.22, 1.32], y: [1194, 1180], dy: [0, 6], shake: 4 } },
-  { start: 387, kind: "prepared",  follow: 0, whip: 2,   move: { z: [1.28, 1.4],  y: [1180, 1172], dy: [0, 4], shake: 6 } },
-  { start: 411, kind: "crowd",     follow: 0,            move: { z: [1.2, 1.52],  y: [1182, 1144], dy: [0, 6], shake: 10 } },
-  { start: 425, kind: "alright",   follow: 0,            move: { z: [1.62, 1.46], y: [1150, 1166], dy: [0, 2], shake: 6 } },
-  { start: 495, kind: "pitspot",   follow: 0,            move: { z: [1.0, 1.14],  y: [1528, 1508], dy: [0, -4], shake: 4 },
-    front: BEHIND_CAR, insert: { x: 1090, y: 1650, z: 1.04, at: 0.58 } },
-  { start: 532, kind: "back",      follow: 0,            move: { z: [1.18, 1.3],  y: [1212, 1184], dy: [0, 4], shake: 7 } },
-  { start: 559, kind: "saying",    follow: RUN * 0.7,    move: { z: [1.22, 1.28], y: [1216, 1206], dy: [-2, 2], shake: 3 } },
-  { start: 594, kind: "resource",  follow: 0,            move: { z: [1.32, 1.24], y: [1200, 1206], dy: [0, 4], shake: 3 } },
-  { start: 621, kind: "prime",     follow: 0,            move: { z: [1.26, 1.34], y: [1206, 1196], dy: [-2, 2], shake: 3 } },
-  { start: 650, kind: "studio",    follow: 0,            move: { z: [1.38, 1.48], y: [1186, 1170], dy: [0, 4], shake: 3 } },
-  { start: 685, kind: "youknow",   follow: RUN * 0.5,    move: { z: [1.34, 1.42], y: [1194, 1186], dy: [0, 2], shake: 3 } },
-  { start: 713, kind: "bite",      follow: 0, whip: 2,   move: { z: [1.42, 1.6],  y: [1182, 1164], dy: [0, 6], shake: 6 } },
-  { start: 735, kind: "perspective", follow: 0,          move: { z: [1.58, 1.72], y: [1164, 1150], dy: [0, 6], shake: 3 } },
-  { start: 759, kind: "also",      follow: 0,            move: { z: [1.66, 1.46], y: [1156, 1174], dy: [0, 4], shake: 3 } },
-  { start: 776, kind: "ideas",     follow: 0,            move: { z: [1.46, 1.6],  y: [1180, 1166], dy: [0, 4], shake: 4 } },
-  { start: 792, kind: "what",      follow: 0,            move: { z: [1.5, 1.9],   y: [1186, 1162], dy: [2, 12], shake: 3 } },
-  { start: 803, kind: "payoff",    follow: 0, zoom: true, move: { z: [1.56, 2.3],  y: [1152, 1124], dy: [-4, 18], shake: 5 } },
+  { start: 0,   kind: "hook",        follow: RUN,        move: { z: [1.58, 1.36], y: [1186, 1196], dy: [6, 16], shake: 9 } },
+  { start: 60,  kind: "views",       follow: RUN,        move: { z: [1.34, 1.42], y: [1194, 1182], dy: [0, 4], shake: 6 } },
+  { start: 141, kind: "hey",         follow: 0,          move: { z: [1.36, 1.28], y: [1196, 1188], dy: [0, -6], shake: 3 } },
+  { start: 170, kind: "vlog",        follow: RUN,        move: { z: [1.18, 1.15], y: [1252, 1262], dy: [0, 8], shake: 3 } },
+  { start: 214, kind: "exploring",   follow: RUN * 0.5,  move: { z: [1.2, 1.14],  y: [1244, 1232], dy: [0, 6], shake: 3 } },
+  { start: W("zombie")[0], kind: "cardio", follow: RUN * 0.75, move: { z: [1.24, 1.34], y: [1202, 1188], dy: [-2, 2], shake: 5 } },
+  { start: 322, kind: "subscribe",   follow: 0,          move: { z: [1.3, 1.22],  y: [1198, 1206], dy: [0, 2], shake: 4 } },
+  { start: 372, kind: "ohno",        follow: 0, whip: 3, move: { z: [1.44, 1.62], y: [1178, 1162], dy: [0, 4], shake: 11 } },
+  { start: 394, kind: "closer",      follow: 0,          move: { z: [1.46, 1.54], y: [1184, 1172], dy: [0, 4], shake: 8 } },
+  { start: 429, kind: "run",         follow: RUN * 1.5,  move: { z: [1.5, 1.34],  y: [1196, 1186], dy: [0, 10], shake: 13 } },
+  { start: SAFE_SHOT_AT, kind: "safe", follow: 0,        move: { z: [1.06, 0.98], y: [1230, 1224], dy: [0, 2], shake: 1.2 } },
+  { start: 533, kind: "back",        follow: 0,          move: { z: [1.24, 1.34], y: [1204, 1186], dy: [0, 4], shake: 6 } },
+  { start: 559, kind: "saying",      follow: RUN * 0.4,  move: { z: [1.22, 1.28], y: [1216, 1206], dy: [-2, 2], shake: 3 } },
+  { start: 594, kind: "resource",    follow: 0,          move: { z: [1.32, 1.24], y: [1200, 1206], dy: [0, 4], shake: 3 } },
+  { start: 621, kind: "prime",       follow: 0,          move: { z: [1.26, 1.34], y: [1206, 1196], dy: [-2, 2], shake: 3 } },
+  { start: M.why, kind: "bleed",     follow: 0, whip: 2, move: { z: [1.3, 1.52],  y: [1200, 1178], dy: [0, 6], shake: 6 } },
+  { start: 685, kind: "youknow",     follow: RUN * 0.3,  move: { z: [1.34, 1.42], y: [1194, 1186], dy: [0, 2], shake: 3 } },
+  { start: 713, kind: "bite",        follow: 0, whip: 2, move: { z: [1.42, 1.58], y: [1190, 1172], dy: [0, 6], shake: 5 } },
+  { start: 759, kind: "also",        follow: 0,          move: { z: [1.46, 1.56], y: [1188, 1176], dy: [0, 4], shake: 3 } },
+  { start: 776, kind: "ideas",       follow: 0,          move: { z: [1.5, 1.64],  y: [1186, 1172], dy: [0, 4], shake: 4 } },
+  { start: 792, kind: "what",        follow: 0,          move: { z: [1.5, 1.92],  y: [1186, 1162], dy: [2, 12], shake: 3 } },
+  { start: 803, kind: "payoff",      follow: 0, zoom: true, move: { z: [1.56, 2.3], y: [1152, 1124], dy: [-4, 18], shake: 5 } },
 ];
 export const SHOTS = SHOT_DEFS.map((d, i) => {
   const next = i + 1 < SHOT_DEFS.length ? SHOT_DEFS[i + 1].start : TOTAL;
   return {
-    n: next - d.start, backdrop: "street", ease: d.ease || "lin", follow: d.follow,
-    whip: d.whip, zoom: d.zoom, front: d.front, insert: d.insert,
+    n: next - d.start, kind: d.kind,
+    backdrop: d.kind === "safe" ? "safe" : "street", ease: d.ease || "lin", follow: d.follow,
+    whip: d.whip, zoom: d.zoom, front: d.kind === "safe" ? null : d.front, insert: d.insert,
+    rescue: d.kind === "safe" ? { x: 540, y: 1180 } : null,
     move: {
       from: { z: d.move.z[0], y: d.move.y[0], dy: d.move.dy[0] },
       to: { z: d.move.z[1], y: d.move.y[1], dy: d.move.dy[1] },
@@ -143,85 +242,80 @@ export function scrollAt(f) {
 // One staging entry per shot kind. Poses: hang walksw point up explore climb
 // pull reach hip cross chin open. gear: backpack flashlight notebook bottle
 // vlog-rig. props.phone (held, screen at lens) / props.bandage (arm patch).
+//
+// Mouth: every hero frame carries a `feel` (the expression it would wear) and the
+// viseme block from mouthAt(f), so the mouth talks on the words and falls back to
+// the feeling's own mouth shape whenever no letter is playing.
 function heroFrame(f, kind, f0, lp) {
   const a = {
     x: 540, y: HERO_GROUND, scale: 1, facing: 0, expr: "scared",
     step: (f * 0.115) % 1, run: 1, L: "walksw", R: "walksw", gear: null,
-    headTilt: 0, tilt: 0, bob: Math.sin(f * 0.62) * 0.16, blink: Math.sin(f * 0.041) > 0.982 ? 1 : 0, look: 0,
+    headTilt: 0, tilt: 0, bob: Math.sin(f * 0.62) * 0.16, blink: 0, look: 0,
     props: null, bloodFx: null,
   };
   const RIG = ["vlog-rig"];
-  const ph = (h, rot, glow = 1) => ({ phone: { hand: "R", rot, glow } });
   switch (kind) {
     case "hook": // sprinting straight at the lens, selfie rig up, horde on his heels
-      a.gear = RIG; a.L = "open"; a.R = "point"; a.tilt = 3 + Math.sin(f * 0.8) * 3;
-      a.props = { bandage: { x: 1 } }; a.headTilt = -0.04;
+      a.gear = RIG; a.L = "road"; a.R = "roadpoint"; a.tilt = 4 + Math.sin(f * 0.8) * 3;
+      a.expr = "surprised"; a.headTilt = -0.04; a.look = -0.2;
       break;
-    case "hey": // host mode, still jogging
-      a.gear = RIG; a.expr = "happy"; a.facing = lerp(-0.22, 0.1, lp); a.run = 0.55; a.step = (f * 0.075) % 1;
-      a.L = "hang"; a.R = "point"; a.headTilt = Math.sin(f * 0.12) * 0.05;
+    case "views": // "this video is getting zero views?!" — sprinting, wounded pride
+      a.gear = RIG; a.run = 1; a.step = (f * 0.2) % 1; a.facing = 0.12; a.L = "road";
+      a.R = f < M.views ? "roadpoint" : "point";
+      a.expr = f < M.views ? "surprised" : "angry"; a.tilt = 2 + Math.sin(f * 1.1) * 2; a.look = 0.2;
+      break;
+    case "hey": // host mode, still jogging up the lane
+      a.gear = RIG; a.expr = "happy"; a.facing = lerp(-0.22, 0.1, lp); a.run = 0.8; a.step = (f * 0.16) % 1;
+      a.L = "road"; a.R = "point"; a.headTilt = Math.sin(f * 0.12) * 0.05;
       break;
     case "vlog": // 3/4 track, thumb over his shoulder at the horde
-      a.gear = RIG; a.expr = "happy"; a.facing = 0.4; a.L = "walksw"; a.R = f < M.vlog ? "point" : "hang";
+      a.gear = RIG; a.expr = "happy"; a.facing = 0.4; a.run = 0.95; a.step = (f * 0.19) % 1;
+      a.L = "road"; a.R = f < M.back ? "point" : "roadpoint";
       break;
-    case "exploring": // scanning the street like a tour guide
-      a.gear = RIG; a.expr = "happy"; a.facing = lerp(0.25, -0.3, lp); a.run = 0.7; a.step = (f * 0.1) % 1;
-      a.L = "hang"; a.R = "point";
+    case "exploring": // running the tour, scanning the street like a tour guide
+      a.gear = RIG; a.expr = "happy"; a.facing = lerp(0.25, -0.3, lp); a.run = 1; a.step = (f * 0.2) % 1;
+      a.L = "road"; a.R = "roadpoint";
       break;
-    case "cardio": // low lens, legs driving
-      a.gear = RIG; a.expr = "happy"; a.facing = 0.12; a.run = 0.85; a.step = (f * 0.155) % 1; a.bob = Math.sin(f * 0.9) * 0.22;
-      a.L = "open"; a.R = "point";
+    case "cardio": // low lens, legs driving, the first zombie closes on the word
+      a.gear = RIG; a.expr = "happy"; a.facing = 0.12; a.run = 1; a.step = (f * 0.23) % 1; a.bob = Math.sin(f * 0.9) * 0.14;
+      a.L = "road"; a.R = f < M.zombie ? "roadpoint" : "point";
+      if (f >= M.zombie) a.headTilt = -0.05;
       break;
-    case "whoa": // the fans are suddenly close
-      a.gear = RIG; a.expr = f < M.detour ? "surprised" : "scared"; a.facing = -0.25; a.run = 0.3; a.step = (f * 0.07) % 1;
-      a.L = "open"; a.R = "point"; a.tilt = -8 * smooth((f - f0) / 5); a.headTilt = -0.06;
+    case "subscribe": // "like and subscribe" — the selfie smile, running backwards
+      a.gear = RIG; a.expr = "happy"; a.facing = -0.3; a.run = 0.9; a.step = (f * 0.18) % 1;
+      a.L = "road"; a.R = "point"; a.headTilt = 0.04;
       break;
-    case "detour": // backpedals, hands come up, phone jitters
-      a.gear = RIG; a.expr = "scared"; a.facing = -0.15; a.run = 0.5; a.step = (f * 0.12) % 1;
-      a.L = "open"; a.R = "point"; a.bob = Math.sin(f * 0.9) * 0.2; a.tilt = -5;
+    case "ohno": // "Oh no!" — the fans are suddenly in the lane
+      a.gear = RIG; a.expr = f < M.oh ? "scared" : "surprised"; a.facing = -0.3; a.run = 1; a.step = (f * 0.2) % 1;
+      a.L = "open"; a.R = "point"; a.tilt = -8 * smooth((f - f0) / 5); a.headTilt = -0.06; a.look = -0.3;
       break;
-    case "fans": // they lunge, he braces
-      a.gear = RIG; a.expr = "scared"; a.facing = -0.1; a.run = 0.35; a.step = (f * 0.09) % 1;
-      a.L = "open"; a.R = "point"; a.tilt = -3;
+    case "closer": // "They're getting closer!" — looks back over his shoulder
+      a.gear = RIG; a.expr = "scared"; a.facing = lerp(-0.2, 0.5, smooth((f - f0) / 8));
+      a.run = 1; a.step = (f * 0.21) % 1; a.L = "road"; a.R = "point"; a.look = 0.6; a.tilt = -3;
       break;
-    case "legs": // INSERT — knees and little zombie hands at the shins, dust
-      a.facing = 0.18; a.run = 1; a.step = (f * 0.2) % 1; a.expr = "scared"; a.L = "walksw"; a.R = "walksw";
-      a.y = HERO_GROUND + 130; a.bob = Math.sin(f * 1.25) * 0.12;
+    case "run": // "Run, run, run!" — full sprint, arms pumping, horde at the heels
+      a.gear = RIG; a.expr = "scared"; a.facing = -0.05 + Math.sin(f * 0.5) * 0.08;
+      a.run = 1; a.step = (f * 0.26) % 1; a.L = "road"; a.R = "road";
+      a.bob = Math.sin(f * 1.15) * 0.14; a.tilt = 8 + Math.sin(f * 0.9) * 3; a.look = 0.15;
       break;
-    case "evasive": // dizzy spins, phone swinging
-      a.gear = RIG; a.expr = "scared"; a.step = (f * 0.17) % 1; a.run = 0.6;
-      a.facing = Math.sin((f - f0) * 0.42) * 0.85; a.tilt = Math.cos((f - f0) * 0.42) * 14;
-      a.L = "open"; a.R = "point"; a.headTilt = Math.sin((f - f0) * 0.9) * 0.1;
+    case "safe": // safe room: he stops, knees soft, hand on his chest
+      a.gear = null; a.expr = f < M.safe - 1 ? "tired" : "happy";
+      a.x = 540; a.y = lerp(1598, 1592 + 2 * Math.sin(f * 0.22), smooth((f - f0) / 12)); a.scale = 0.8;
+      a.facing = lerp(0.3, 0.06, smooth((f - f0) / 16)); a.run = 0; a.step = 0;
+      a.L = f < M.safe ? "hip" : "chest";
+      a.R = f < M.safe ? "lean" : "point";
+      a.bob = Math.sin(f * 0.42) * 0.05; a.headTilt = 0.03; a.look = 0.1;
+      a.props = { bandage: { x: 1 } };
       break;
-    case "folks": // squat 3/4, catching his breath mid-sentence
-      a.facing = 0.42; a.scale = lerp(1, 0.93, smooth((f - f0) / 8)); a.expr = "happy"; a.run = 0.2;
-      a.step = (f * 0.05) % 1; a.L = "hip"; a.R = "point"; a.gear = RIG;
-      break;
-    case "prepared": // sets up a "lesson", mugging to the lens
-      a.gear = RIG; a.facing = 0.3; a.expr = "thinking"; a.run = 0.25; a.step = (f * 0.05) % 1;
-      a.R = "point"; a.L = "hip"; a.headTilt = 0.05;
-      break;
-    case "crowd": // the horde piles on top of him
-      a.expr = "surprised"; a.facing = -0.12; a.step = (f * 0.2) % 1; a.run = 0.5;
-      a.L = "up"; a.R = "up"; a.tilt = -10; a.bob = Math.sin(f * 1.1) * 0.2; a.gear = null;
-      break;
-    case "alright": // pulls himself out of the pile
-      a.expr = "surprised"; a.L = "open"; a.R = "open"; a.facing = 0.1;
-      a.bob = Math.sin(f * 0.7) * 0.14; a.headTilt = 0.08; a.y = HERO_GROUND - 6;
-      break;
-    case "pitspot": // ducks behind the car with the flashlight
-      a.x = 520; a.y = lerp(1700, 1652 + 8 * Math.sin(f * 0.3), smooth((f - f0) / 9)); a.scale = 0.97;
-      a.facing = -0.95; a.expr = "scared"; a.L = "explore"; a.R = "pull"; a.cone = 0.9; a.gear = ["flashlight"];
-      break;
-    case "back": // pops up: "And we're back!"
-      a.y = lerp(1640, HERO_GROUND, smooth((f - f0) / 7)); a.facing = lerp(0.18, 0, lp); a.expr = "happy";
-      a.L = "open"; a.R = "open"; a.props = { phone: { hand: "R", rot: -12 } };
+    case "back": // pops up: "Anyway guys…"
+      a.gear = RIG; a.expr = "happy"; a.facing = lerp(0.18, 0.05, lp); a.run = 0.55; a.step = (f * 0.11) % 1;
+      a.L = "road"; a.R = "point"; a.props = { phone: { hand: "R", rot: -12 } };
       break;
     case "saying": // walks out and talks to the phone again
-      a.facing = 0.5; a.run = 0.75; a.step = (f * 0.1) % 1; a.expr = "happy"; a.L = "walksw"; a.R = "point";
+      a.gear = RIG; a.facing = 0.5; a.run = 0.8; a.step = (f * 0.16) % 1; a.expr = "happy"; a.L = "road"; a.R = "point";
       a.props = { phone: { hand: "R", rot: -14 } };
       break;
-    case "resource": // gestures at the street: "resourcefulness is key"
+    case "resource": // gestures at the street
       a.facing = 0.6; a.run = 0.4; a.step = (f * 0.07) % 1; a.expr = "happy"; a.L = "hip"; a.R = "point";
       a.props = { phone: { hand: "R", rot: -10 } };
       break;
@@ -229,112 +323,164 @@ function heroFrame(f, kind, f0, lp) {
       a.facing = lerp(0.6, -0.35, lp); a.expr = "happy"; a.L = "hang"; a.R = "point"; a.run = 0.3; a.step = (f * 0.06) % 1;
       a.props = { phone: { hand: "L", rot: -12 } };
       break;
-    case "studio": // "a temporary content studio!": arms wide
-      a.facing = 0.1; a.expr = "happy"; a.L = "open"; a.R = "open"; a.headTilt = -0.06; a.run = 0.2; a.step = (f * 0.05) % 1;
+    case "bleed": // "Why is my arm bleeding?" — looks down at the arm ON the word
+      a.expr = f < M.arm ? "happy" : f < M.bleeding ? "surprised" : "scared";
+      a.facing = 0.08; a.run = 0.12; a.step = (f * 0.04) % 1;
+      a.L = "hang"; a.R = f < M.arm ? "pull" : "chin";
+      a.headTilt = f < M.arm ? -0.05 : 0.16; a.look = f < M.arm ? 0.2 : -0.75;
+      a.props = { bandage: { x: 1 } };
+      // the blood arrives exactly on "bleeding" and then pumps with the heartbeat
+      a.bloodFx = { on: f >= M.bleeding, k: f < M.bleeding ? 0 : 0.35 + 0.35 * smooth((f - M.bleeding) / 6), pulse: true, t: f / 30, seed: 2, hand: [672, 1010], drips: 2, armSpray: true };
       break;
     case "youknow": // lowers the phone, goes thoughtful
       a.facing = 0.1; a.expr = "thinking"; a.L = "hang"; a.R = "point"; a.run = 0.25; a.step = (f * 0.05) % 1;
-      a.props = { phone: { hand: "R", rot: -6, glow: 0.9 } };
+      a.props = { phone: { hand: "R", rot: -6, glow: 0.9 }, bandage: { x: 1 } };
+      a.bloodFx = { on: true, k: 0.5, pulse: true, t: f / 30, seed: 2, hand: [672, 1010], drips: 2, armSpray: true };
       break;
-    case "bite": // the phone drops away, he sees the arm: drip, drip
-      a.expr = "surprised"; a.facing = 0.08; a.L = "chin"; a.R = "point"; a.headTilt = 0.08; a.run = 0.12; a.step = (f * 0.04) % 1;
+    case "bite": // "Yes, I'm the content now." — shrugs at the wound, smile back on
+      a.expr = f < M.content ? "surprised" : "happy";
+      a.facing = 0.06; a.L = "chin"; a.R = f < M.content ? "point" : "open";
+      a.headTilt = 0.12; a.run = 0.12; a.step = (f * 0.04) % 1;
       a.props = { bandage: { x: 1 }, phone: { hand: "R", rot: -42, glow: 0.7 } };
-      a.bloodFx = { on: true, k: 0.4, t: f / 30, seed: 2, hand: [672, 1010], drips: 3, trail: [[2, 0.2], [5, 0.32]] };
+      a.bloodFx = { on: true, k: 0.7, pulse: true, t: f / 30, seed: 2, hand: [672, 1010], drips: 2, armSpray: true, trail: [[2, 0.2], [5, 0.32]] };
       break;
-    case "perspective": // stares at it, then cold
-      a.expr = (f - f0) > 9 ? "scared" : "surprised"; a.facing = 0.04; a.headTilt = 0.11;
-      a.L = "chin"; a.R = "point"; a.props = { bandage: { x: 1 }, phone: { hand: "R", rot: -44, glow: 0.7 } };
-      a.bloodFx = { on: true, k: 0.55, t: f / 30, seed: 2, hand: [672, 1010], drips: 4, trail: [[2, 0.2], [6, 0.3], [2, 0.42]] };
-      break;
-    case "also": // hides the arm behind his back, smile snaps on
+    case "also": // "Like…" — hides the arm behind his back, smile snaps on
       a.expr = "happy"; a.facing = 0.16; a.L = "hang"; a.R = "pull";
       a.props = { phone: { hand: "R", rot: -18, glow: 0.9 } };
-      a.bloodFx = { on: true, k: 0.62, t: f / 30, seed: 2, hand: [700, 1184], drips: 3, trail: [[2, 0.18], [6, 0.3], [2, 0.44]] };
+      a.bloodFx = { on: true, k: 0.55, pulse: true, t: f / 30, seed: 2, hand: [700, 1184], drips: 2 };
       break;
-    case "ideas": // wide three, arm hidden, phone up
+    case "ideas": // "and subscribe." — wide three, arm hidden, phone up
       a.expr = "happy"; a.facing = -0.08; a.L = "open"; a.R = "pull"; a.headTilt = -0.04;
-      a.bloodFx = { on: true, k: 0.7, t: f / 30, seed: 2, hand: [700, 1184], drips: 3, trail: [[2, 0.2], [7, 0.32], [2, 0.46]] };
+      a.props = { phone: { hand: "R", rot: -20 } };
+      a.bloodFx = { on: true, k: 0.6, pulse: true, t: f / 30, seed: 2, hand: [700, 1184], drips: 2, trail: [[2, 0.2], [7, 0.32]] };
       break;
     case "what": // presentation smile, slow push
       a.expr = "happy"; a.facing = 0.02; a.L = "open"; a.R = "pull"; a.headTilt = -0.05;
-      a.props = { phone: { hand: "R", rot: -20 } };
-      a.bloodFx = { on: true, k: 0.75, t: f / 30, seed: 2, hand: [700, 1184], drips: 3, trail: [[2, 0.2], [7, 0.34]] };
+      a.props = { phone: { hand: "R", rot: -22 } };
+      a.bloodFx = { on: true, k: 0.7, pulse: true, t: f / 30, seed: 2, hand: [700, 1184], drips: 3, pool: 0.25, trail: [[2, 0.2], [7, 0.34]] };
       break;
     case "payoff": // the arm comes up into the lens, the smile drops
-      a.expr = f < M.piece ? "happy" : f < M.you + 4 ? "surprised" : "scared";
-      a.facing = 0.03; a.headTilt = 0.12; a.L = "open"; a.R = f < M.audience ? "pull" : "point";
+      a.expr = f < M.content ? "happy" : f < M.subscribe ? "surprised" : "scared";
+      a.facing = 0.03; a.headTilt = 0.12; a.L = "open"; a.R = f < M.subscribe ? "pull" : "point";
       a.props = { bandage: { x: 1, size: 1.3 }, phone: { hand: "L", rot: -4, glow: 0.6 } };
-      a.bloodFx = { on: true, k: 0.9, t: f / 30, seed: 2, hand: [690, 1090], drips: 5, pool: 0.55, trail: [[3, 0.24], [7, 0.36], [3, 0.5]] };
+      a.bloodFx = { on: true, k: 0.9, pulse: true, t: f / 30, seed: 2, hand: [690, 1090], drips: 4, pool: 0.6, trail: [[3, 0.24], [7, 0.36], [3, 0.5]] };
       break;
   }
+  // talking mouth on the words; the feeling's own shape is the fallback
+  a.feel = a.expr;
+  a.viseme = mouthAt(f);
+  a.blink = (f % 97) < 3 ? 1 : 0;
   return a;
 }
 
 // ---------------------------------------------------------------- the horde
-// A semicircle of "fans" around him: close on both sides, a pair further back,
-// one near figure. Every member lurches, lunge-steps and bobs; they close in
-// shot by shot (SPACING) so the chase visibly tightens the whole short.
-const FLOCK = [
-  { dx: -250, y: 1604, z: 0.9, s: 0.95, ph: 0.0 }, { dx: 250, y: 1600, z: 0.92, s: 0.95, ph: 1.9 },
-  { dx: -340, y: 1614, z: 0.74, s: 0.74, ph: 3.2 }, { dx: 340, y: 1620, z: 0.76, s: 0.76, ph: 4.6 },
-  { dx: -430, y: 1596, z: 0.62, s: 0.68, ph: 0.8 }, { dx: 430, y: 1592, z: 0.62, s: 0.7, ph: 2.5 },
+// A real crowd, not two files of figures: six waves on six different ground
+// lines (nearer = lower on screen + bigger), so the pack has depth and stays
+// dense on BOTH sides of him. Every member lurches, lunge-steps and bobs; they
+// close in shot by shot (SPACING) so the chase visibly tightens the whole short.
+const PACK = [];
+const WAVES = [
+  { n: 3, dx: [-330, 0, 330], y: 1596, s: 1.06, spread: 96 },
+  { n: 4, dx: [-620, -290, 250, 600], y: 1606, s: 1.0, spread: 120 },
+  { n: 4, dx: [-760, -360, 380, 740], y: 1624, s: 0.89, spread: 150 },
+  { n: 4, dx: [-880, -470, 430, 900], y: 1650, s: 0.78, spread: 170 },
+  { n: 4, dx: [-1000, -560, 520, 1010], y: 1682, s: 0.68, spread: 190 },
+  { n: 3, dx: [-1120, 620, 1120], y: 1718, s: 0.6, spread: 210 },
 ];
+WAVES.forEach((wv, wi) => {
+  wv.dx.forEach((dx, j) => {
+    PACK.push({ wave: wi, dx, dy: (wv.y - 1600), y: wv.y, s: wv.s, z: wv.s, spread: wv.spread,
+      ph: hash(wi * 17 + j) * 6.28, near: wi < 2, side: Math.sign(dx) });
+  });
+});
+const GAP_OPEN = 235;     // half-width of the lane they leave round the hero
 const SPACING = [
-  [70, 30], [80, 45], [95, 55], [90, 50], [65, 30], [30, 10], [0, 0], [55, 40], [15, 0],
-  [0, 0], [40, 80], [110, 105], [120, 105], [130, 80], [140, 70], [120, 80], [110, 90],
-  [100, 95], [80, 85], [70, 85], [60, 90], [45, 95], [40, 100], [35, 100], [30, 100], [25, 100], [20, 100],
+  [0.55, 0.18], [0.45, 0.22], [0.30, 0.26], [0.05, 0.30], [0.0, 0.26], [0.0, 0.16],
+  [0.0, 0.12], [0.0, 0.06], [0.0, 0.02], [0.0, 0.0], [0.0, 0.0], [0.10, 0.05],
+  [0.12, 0.09], [0.16, 0.10], [0.20, 0.12], [0.24, 0.14], [0.40, 0.22], [0.30, 0.16],
+  [0.24, 0.12], [0.20, 0.10], [0.14, 0.08], [0.06, 0.04], [0.0, 0.0],
 ];
+// kinds where the pack is right on him (hands land, faces fill the frame)
+const ONHIM = { closer: 0.35, run: 0.55, ohno: 0.45, bite: 0.4, also: 0.45, ideas: 0.5, what: 0.65, payoff: 0.8 };
 
 function hordeAt(f, si, kind, hero) {
   const out = [];
-  const [dx, dy] = SPACING[si] || [80, 60];
+  const [dx, dy] = SPACING[si] || [0.2, 0.12];
   const pile = kind === "crowd" || kind === "alright";
-  const close = kind === "fans";
-  // the fans are placed relative to the HERO's screen spot: his shot centre is 540
-  // except where the lens itself is elsewhere (the insert, the pit-stop shot)
-  const R = { pitspot: rows => [485, 1600], insert: rows => [1010, 1700] }[kind] || null;
-  const fanCx = R ? R()[0] : 540;
-  for (let i = 0; i < FLOCK.length; i++) {
-    const b = FLOCK[i];
-    const ph = b.ph + f * 0.033 * (0.7 + hash(i) * 0.7);
+  const onHim = ONHIM[kind] ?? 0;
+  const f0 = si ? CUM[si - 1] : 0, ago = f - f0;
+  const busy = kind === "run" || kind === "hook" || kind === "views" || kind === "safe";
+  for (let i = 0; i < PACK.length; i++) {
+    const b = PACK[i];
+    const ph = b.ph + f * 0.033 * (0.75 + hash(i) * 0.5);
     // lurch: each fan advances and shuffles sideways every beat
-    let x = fanCx + b.dx * (1 + dx / 300) + Math.sin(ph * 2.7 + i) * 10;
+    const lane = 1 - 0.55 * clamp01(dx);                    // how much they close INTO the lane
+    const px = b.dx * lane;
+    const push = Math.abs(px) < GAP_OPEN * b.s ? Math.sign(px || 1) * (GAP_OPEN * b.s - Math.abs(px)) * 0.85 : 0;
+    let x = 540 + px + push + Math.sin(ph * 2.7 + i) * 11;
     let y = b.y + dy * (0.5 + 0.5 * b.z) + Math.sin(ph * 6.4 + i) * 5;
-    let z = b.z;
-    let run = 0.5 + 0.35 * Math.sin(ph * 2.2 + i);
+    const z = b.z;
+    let run = 0.45 + 0.4 * Math.sin(ph * 2.2 + i);
     let step = (ph * 2.2) % 1;
     const lunge = Math.max(0, Math.sin(ph * 5.1));
-    let L = lunge > 0.6 ? "reach" : "walksw";
-    let R = lunge > 0.35 ? "reach" : "open";
-    let tilt = 4 + Math.sin(ph * 4) * 3;
+    let L = lunge > 0.6 ? "reach" : "roadreach";
+    let R = lunge > 0.35 ? "reach" : "roadreach";
+    let tilt = 5 + Math.sin(ph * 4) * 3;
     let expr = "angry";
     let facing = b.dx < 0 ? 0.5 : -0.5;      // the crowd faces in toward him
-    if (close) {
-      // they lunge in and their hands land on his shoulders
-      const k = smooth((f - CUM[si - 1]) / 7);
-      x = lerp(x, hero.x + (b.dx * 0.55) + (dx * 0.3), k); y = lerp(y, hero.y + 26, k * 0.8);
-      L = "reach"; R = "reach"; run = 1; step = (f * 0.21 + i * 0.13) % 1; tilt = 11; z = lerp(z, 0.8 + i * 0.035, k);
-    } else if (pile) {
-      // the pile; then they are thrown off frame when he pulls free
-      const pop = kind === "alright" ? smooth((f - CUM[si - 1]) / 8) : 0;
-      x = hero.x + (i - 2.5) * 96 - pop * (340 + i * 70) * (i % 2 ? 1 : -1);
-      y = hero.y + (i % 3) * 44 - pop * 80; z = 1.16 + (i % 3) * 0.1;
-      L = "reach"; R = "reach"; run = 0.1; step = (f * 0.13 + i * 0.3) % 1; tilt = (i - 2.5) * 6; facing = 0.2;
-    } else if (kind === "pitspot") {
-      // held behind the car: they shuffle around it while he hides
-      x = fanCx + b.dx * 1.3 + Math.sin(ph * 2.2 + i) * 18; y = b.y + 120; z = b.z * 0.95; run = 0.3; step = (ph * 1.2) % 1;
-    } else if (kind === "payoff" || kind === "what" || kind === "ideas") {
-      // they close onto his shoulders by the end of the line
-      const k = smooth((f - CUM[si - 1]) / 14);
-      x = lerp(x, hero.x + b.dx * 0.62, k * 0.7); y = lerp(y, hero.y + 14, k * 0.6); L = "reach"; R = "reach"; run = 0.8; step = (f * 0.15 + i * 0.2) % 1;
+    if (busy) { run = 0.95; step = (f * 0.24 + i * 0.17) % 1; tilt = 9 + Math.sin(ph * 5) * 4; }
+    // at full sprint they wave their arms; when a hand would land, they grab
+    if (onHim > 0 && ago > 4 && b.wave < 4) {
+      const k = smooth((ago - 4) / 10) * onHim * (b.wave < 2 ? 1 : 0.5);
+      const line = GAP_OPEN * b.z;
+      x = lerp(x, hero.x + b.side * Math.max(120, Math.abs(b.dx) * 0.35 * (1 - onHim * 0.35)), k);
+      y = lerp(y, hero.y + (b.dy ?? 0) * 0.4, k * 0.7);
+      L = "reach"; R = "reach"; run = 1; step = (f * 0.2 + i * 0.13) % 1; tilt = 12;
+    }
+    if (pile) { // thrown off frame when he pulls free
+      const pop = kind === "alright" ? smooth(ago / 8) : 0;
+      x = hero.x + (i - 5) * 78 - pop * (340 + i * 40) * (i % 2 ? 1 : -1);
+      y = hero.y + (i % 3) * 40 - pop * 80; z = 1.05 + (i % 3) * 0.07;
+      L = "reach"; R = "reach"; run = 0.1; step = (f * 0.13 + i * 0.3) % 1; tilt = (i - 5) * 4; facing = 0.2;
+    }
+    // the two "fans" who lean right over his shoulders (only once the chase is on)
+    if (b.wave === 0 && Math.abs(b.dx) < 40 && f >= STRESS.zombies[0]) {
+      const k = smooth((f - STRESS.zombies[0]) / 14) * (0.55 + 0.45 * onHim);
+      for (const sd of [-1, 1]) out.push({
+        zombie: true, depth: 995 + (sd > 0 ? 1 : 0), x: hero.x + sd * (168 - 46 * k), y: hero.y + 34,
+        scale: 0.96, facing: sd < 0 ? 0.55 : -0.55, expr: "angry",
+        step: (f * 0.2 + (sd > 0 ? 0.4 : 0)) % 1, run: 1, L: "reach", R: "reach", tilt: sd * 9,
+        bob: Math.sin(f * 0.7 + sd) * 0.1, headTilt: sd * 0.05, blink: 0, look: -sd * 0.4,
+      });
     }
     out.push({
-      zombie: true, depth: i * 10 + hash(i) * 5, x, y, scale: b.s * z * 1.05, facing, expr,
+      zombie: true, depth: 600 + i * 10 + hash(i) * 5, x, y, scale: z * 1.02, facing, expr,
       step, run: Math.max(0, Math.min(1, run)), L, R, tilt,
       bob: Math.sin(ph * 6.2 + i) * 0.13, headTilt: Math.sin(ph * 2.7 + i) * 0.06,
     });
   }
   return out;
+}
+
+// ---------------------------------------------------------------- safe room
+export const SAFE_ROOM = {
+  shelves: [
+    { x: 130, y: 1128, w: 300, h: 320 },
+    { x: 830, y: 1140, w: 300, h: 320 },
+  ],
+  lamp: { x: 205, y: 1120 },
+  board: { x: 540, y: 846 },
+};
+
+// two rescue silhouettes behind the boarded window (stick figures, not zombies)
+function rescueAt(f, base) {
+  if (!base) return [];
+  return [0, 1].map((i) => ({
+    zombie: false, depth: 900 + i * 10, base: base.y + 196,
+    x: 540 + (i ? 268 : -262), y: base.y + 196, scale: 0.6, facing: i ? -0.2 : 0.2, expr: "happy",
+    step: 0, run: 0, L: i ? "kayak" : "hang", R: i ? "point" : "kayak", tilt: (i ? -4 : 4),
+    bob: Math.sin(f * 0.08 + i * 2) * 0.03, headTilt: 0, blink: 0, look: 0,
+  }));
 }
 
 export const actorsAt = (f) => {
@@ -343,8 +489,9 @@ export const actorsAt = (f) => {
   const lp = (fi - f0) / Math.max(1, SHOTS[si].n);
   const hero = heroFrame(fi, kind, f0, lp);
   const out = [hero];
+  if (kind === "safe") { out.push(...rescueAt(fi, SHOTS[si].rescue)); return out; }
   let horde = hordeAt(fi, si, kind, hero);
-  if (kind === "legs") horde = horde.slice(0, 4).map((m, i) => ({ ...m, scale: 0.5, y: 1790 + i * 26, x: 360 + i * 130 }));
+  if (kind === "legs") horde = horde.slice(0, 6).map((m, i) => ({ ...m, scale: 0.46 + i * 0.03, y: 1800 + i * 18, x: 300 + i * 96 }));
   out.push(...horde);
   return out;
 };
@@ -352,23 +499,32 @@ export const actorsAt = (f) => {
 // ---------------------------------------------------------------- fx
 const si_ = (f) => shotIndex(Math.max(0, Math.min(TOTAL - 1, Math.round(f))));
 export const fxAt = (f) => {
-  const si = si_(f), s = SHOTS[si], f0 = si ? CUM[si - 1] : 0, ago = f - f0;
-  const out = [{ kind: "embers", k: 1 }];
-  out.push({ kind: "paper", k: si >= 2 && si <= 8 ? 1 : 0.55 });
-  if (s.follow) out.push({ kind: "speed", k: 0.5 + 0.5 * Math.sin(f * 0.45) ** 2, dir: 1 });
-  if (si === 0 || si === 6 || si === 8 || si === 12) out.push({ kind: "dust", k: 0.3 + 0.25 * Math.abs(Math.sin(f * 0.4)) });
-  if (si > 0 && ago < 2) out.push({ kind: "flash", k: 0.10 * (1 - ago / 2) });
-  if (si === SHOTS.length - 1 && f >= M.piece) out.push({ kind: "flash", k: 0.5 * Math.max(0, 1 - (f - M.piece + 1) / 4) });
+  const si = si_(f), s = SHOTS[si], kind = KINDS[si], f0 = si ? CUM[si - 1] : 0, ago = f - f0;
+  const out = [];
+  if (kind === "safe") {
+    out.push({ kind: "dustmotes", k: 1 }, { kind: "safelight", k: 1 });
+    return out;                                                     // calm, clean: no fire, no grain storm
+  }
+  out.push({ kind: "embers", k: 1 });
+  out.push({ kind: "paper", k: si <= 7 ? 1 : 0.55 });
+  // the run: speed lines plus sprayed gravel + dust puffs at the soles
+  if (s.follow || ONHIM[kind]) out.push({ kind: "speed", k: 0.5 + 0.5 * Math.sin(f * 0.45) ** 2, dir: 1 });
+  if (kind === "run") { out.push({ kind: "grit", k: 0.9 }); out.push({ kind: "dust", k: 0.2 + 0.2 * Math.abs(Math.sin(f * 0.6)) }); }
+  if (kind === "hook" || kind === "ohno" || kind === "closer") out.push({ kind: "dust", k: 0.3 + 0.25 * Math.abs(Math.sin(f * 0.4)) });
+  if (si > 0 && ago < 2) out.push({ kind: "flash", k: 0.08 * (1 - ago / 2) });
+  // the blood starts on "bleeding": a short red flash exactly on the word
+  if (f >= STRESS.bleeding[0] && f < STRESS.bleeding[0] + 3) out.push({ kind: "tint", col: "#ff2d20", a: 0.3 * (1 - (f - STRESS.bleeding[0]) / 3) });
+  if (si === SHOTS.length - 1 && f >= M.subscribe) out.push({ kind: "flash", k: 0.4 * Math.max(0, 1 - (f - M.subscribe + 1) / 4) });
   return out;
 };
 
-// a red pulse when the bite lands, a sick warm grade on the payoff
+// a red pulse on the word "bleeding", a sick warm grade on the payoff
 export const gradeAt = (f) => {
-  const si = si_(f), f0 = si ? CUM[si - 1] : 0;
-  if (KINDS[si] === "bite") return { tint: "#ff3b2e", a: 0.18 * Math.sin(Math.min(1, (f - f0) / 7) * Math.PI) };
-  if (KINDS[si] === "payoff") { const k = clamp01((f - M.piece) / 12); return { tint: "#ff5a3c", a: 0.08 + 0.14 * k, desat: 0.3 * k }; }
+  const si = si_(f), kind = KINDS[si];
+  const [bs, be] = STRESS.bleeding;
+  if (f >= bs && f < be + 8) { const k = clamp01((f - bs) / (be + 8 - bs)); return { tint: "#ff3b2e", a: 0.22 * Math.sin(k * Math.PI) }; }
+  if (kind === "payoff") { const k = clamp01((f - M.content) / 14); return { tint: "#ff5a3c", a: 0.08 + 0.14 * k, desat: 0.3 * k }; }
   return null;
 };
 
 export const CAPTIONS = null;
-export const TAG = null;
