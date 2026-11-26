@@ -27,6 +27,12 @@ function shotAt(f) {
 }
 const ease = { lin: (p) => p, out: (p) => 1 - (1 - p) ** 3, inout: (p) => 0.5 - 0.5 * Math.cos(Math.PI * p), in: (p) => p * p };
 
+/*
+ * Front-layer props (cars, poles, ...). A backdrop may take a 5th argument
+ * front=true and then paints ONLY the props that sit in front of the actors;
+ * main.js calls it a second time around the near actors (see story depth).
+ */
+
 function renderFrame(f) {
   const T = f / FPS;
   const shot = shotAt(f);
@@ -39,11 +45,15 @@ function renderFrame(f) {
   g.translate(W / 2, H / 2); g.scale(cam.z, cam.z); g.translate(-cam.x, -cam.y);
 
   const bd = BACKDROPS[shot.backdrop] || BACKDROPS.room;
-  bd(g, W, H, T);
+  const frontArgs = story.FRONT || null;
+  bd(g, W, H, T, false, frontArgs);
 
-  // actors
-  const actors = story.actorsAt(f, T) || [];
-  for (const a of actors) {
+  // actors, far → near. Objects tagged {depth} are horde members: they sit
+  // inside the backdrop, so they paint here (below the hero) but still animate.
+  const actors = (story.actorsAt(f, T) || []).slice();
+  const sortY = (a) => (a.depth != null ? -1e6 + a.depth : (a.y ?? 0));
+  actors.sort((a, b) => sortY(a) - sortY(b));
+  const drawOne = (a) => {
     g.save();
     const s = a.scale || 1;
     // anchor: design-space (cx=300, soles=975) maps to the actor's (x, y)
@@ -54,22 +64,48 @@ function renderFrame(f) {
       seed: a.seed ?? 3, L: a.L || "hang", R: a.R || "hang", step: a.step ?? 0,
       run: a.run ?? 0, tilt: a.tilt ?? 0, headTilt: a.headTilt ?? 0, bob: a.bob ?? 0,
       gear: a.gear ?? null, cone: a.cone ?? 0,
+      props: a.props ?? null, bloodFx: a.bloodFx ?? null, zombie: a.zombie ?? false,
+      viseme: a.viseme ?? null, cap: a.cap ?? "red", vest: a.vest ?? false,
     });
+    // aerial perspective: a flat dark wash over a whole figure = it sits further back
+    if (a.tint > 0) {
+      g.globalCompositeOperation = "source-atop";
+      g.globalAlpha = 1; g.fillStyle = `rgba(11,16,23,${a.tint})`;
+      g.fillRect(-400, -400, 1400, 2000);
+    }
     g.restore();
-  }
+  };
+  for (const a of actors) if (a.depth != null) drawOne(a);
+  // ground contact shadows (own layer: painted over the road, under props + hero)
+  bd(g, W, H, T, "shadow", { shadows: actors.filter((a) => a.shadow) });
+  // props that stand between the horde and the hero
+  bd(g, W, H, T, true, frontArgs);
+  for (const a of actors) if (a.depth == null) drawOne(a);
+  // props in front of the hero (cars the camera is behind, etc.)
+  if (story.FRONT_OVER) { g.save(); g.globalAlpha = 1; bd(g, W, H, T, "over", frontArgs); g.restore(); }
 
   // fx
+  const SCROLL = story.scrollAt ? story.scrollAt(f) : 0;
   for (const fx of story.fxAt ? story.fxAt(f, T) || [] : []) {
     if (fx.kind === "dust") FX.dust(g, W, H, fx.k ?? 0, fx.col);
     if (fx.kind === "rain") FX.rain(g, W, H, T, fx.k ?? 1);
     if (fx.kind === "flash") FX.flash(g, W, H, fx.k ?? 0);
+    if (fx.kind === "embers") FX.embers(g, W, H, T, fx.k ?? 1);
+    if (fx.kind === "paper") FX.paper(g, W, H, T, fx.k ?? 1, SCROLL);
+    if (fx.kind === "speed") FX.speed(g, W, H, T, fx.k ?? 1, fx.dir ?? 1);
+    if (fx.kind === "dustmotes") FX.dustmotes(g, W, H, T, fx.k ?? 1);
+    if (fx.kind === "safelight") FX.safelight(g, W, H, T, fx.k ?? 1);
+    if (fx.kind === "grit") FX.grit(g, W, H, T, fx.k ?? 1);
+    if (fx.kind === "tint") FX.tint(g, W, H, fx.a ?? 0.3);
   }
 
   g.restore();
 
-  // post: vignette + grain (outside the camera transform)
-  FX.vignette(g, W, H);
-  FX.grain(g, W, H, f);
+  // post: grade (slow-mo / punch tint), vignette + grain
+  if (story.gradeAt) { const gr = story.gradeAt(f); if (gr) FX.grade(g, W, H, gr); }
+  const inSafe = shot.kind === "safe";
+  FX.vignette(g, W, H, inSafe ? 0.26 : 1);          // the safe room breathes: softer corners
+  if (!inSafe) FX.grain(g, W, H, f);
 
   // captions (only when the story defines them — off by default)
   if (story.CAPTIONS) {

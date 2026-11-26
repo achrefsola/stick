@@ -65,10 +65,24 @@ function renderFrame(f) {
       run: a.run ?? 0, tilt: a.tilt ?? 0, headTilt: a.headTilt ?? 0, bob: a.bob ?? 0,
       gear: a.gear ?? null, cone: a.cone ?? 0,
       props: a.props ?? null, bloodFx: a.bloodFx ?? null, zombie: a.zombie ?? false,
+      viseme: a.viseme ?? null, cap: a.cap ?? "red", vest: a.vest ?? false,
     });
+    // aerial perspective: a flat dark wash over a whole figure = it sits further back.
+    // Clip tightly to the figure's own bounds so the wash can never paint a band on
+    // the backdrop (source-atop on a scaled/translated actor leaked at the frame edge).
+    if (a.tint > 0) {
+      g.save();
+      g.beginPath(); g.rect(a.x - 230 * s, a.y - 1180 * s, 460 * s, 1200 * s); g.clip();
+      g.globalCompositeOperation = "source-atop";
+      g.globalAlpha = 1; g.fillStyle = `rgba(11,16,23,${a.tint})`;
+      g.fillRect(-400, -400, 1400, 2000);
+      g.restore();
+    }
     g.restore();
   };
   for (const a of actors) if (a.depth != null) drawOne(a);
+  // ground contact shadows (own layer: painted over the road, under props + hero)
+  bd(g, W, H, T, "shadow", { shadows: actors.filter((a) => a.shadow) });
   // props that stand between the horde and the hero
   bd(g, W, H, T, true, frontArgs);
   for (const a of actors) if (a.depth == null) drawOne(a);
@@ -76,21 +90,27 @@ function renderFrame(f) {
   if (story.FRONT_OVER) { g.save(); g.globalAlpha = 1; bd(g, W, H, T, "over", frontArgs); g.restore(); }
 
   // fx
+  const SCROLL = story.scrollAt ? story.scrollAt(f) : 0;
   for (const fx of story.fxAt ? story.fxAt(f, T) || [] : []) {
     if (fx.kind === "dust") FX.dust(g, W, H, fx.k ?? 0, fx.col);
     if (fx.kind === "rain") FX.rain(g, W, H, T, fx.k ?? 1);
     if (fx.kind === "flash") FX.flash(g, W, H, fx.k ?? 0);
     if (fx.kind === "embers") FX.embers(g, W, H, T, fx.k ?? 1);
-    if (fx.kind === "paper") FX.paper(g, W, H, T, fx.k ?? 1);
+    if (fx.kind === "paper") FX.paper(g, W, H, T, fx.k ?? 1, SCROLL);
     if (fx.kind === "speed") FX.speed(g, W, H, T, fx.k ?? 1, fx.dir ?? 1);
+    if (fx.kind === "dustmotes") FX.dustmotes(g, W, H, T, fx.k ?? 1);
+    if (fx.kind === "safelight") FX.safelight(g, W, H, T, fx.k ?? 1);
+    if (fx.kind === "grit") FX.grit(g, W, H, T, fx.k ?? 1);
+    if (fx.kind === "tint") FX.tint(g, W, H, fx.a ?? 0.3);
   }
 
   g.restore();
 
   // post: grade (slow-mo / punch tint), vignette + grain
   if (story.gradeAt) { const gr = story.gradeAt(f); if (gr) FX.grade(g, W, H, gr); }
-  FX.vignette(g, W, H);
-  FX.grain(g, W, H, f);
+  const inSafe = shot.kind === "safe";
+  FX.vignette(g, W, H, inSafe ? 0.26 : 1);          // the safe room breathes: softer corners
+  if (!inSafe) FX.grain(g, W, H, f);
 
   // captions (only when the story defines them — off by default)
   if (story.CAPTIONS) {

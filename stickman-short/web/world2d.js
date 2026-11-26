@@ -190,6 +190,22 @@ const wallProp = (g, o) => {
 /** dispatch table: story FRONT objects use {kind: "car", x, y, scale, ...} */
 export const PROPS = { car: carProp, pole: poleProp, trash: trashProp, hydrant: hydrantProp, sign: signProp, fence: fenceProp, wall: wallProp };
 
+/** Contact shadows for actors standing on the road: one soft ellipse each, sized by
+ *  the actor's scale and thrown slightly away from frame centre (a single key light). */
+export function actorShadows(g, list) {
+  if (!list || !list.length) return;
+  for (const a of list) {
+    const s = a.scale || 1, rx = 52 * s, ry = 11 * s;
+    const off = (a.x - 540) * 0.06;
+    g.save();
+    const rg = g.createRadialGradient(a.x + off, a.y + 2, 2, a.x + off, a.y + 2, rx);
+    rg.addColorStop(0, "rgba(4,7,11,0.55)"); rg.addColorStop(0.7, "rgba(4,7,11,0.28)"); rg.addColorStop(1, "rgba(4,7,11,0)");
+    g.fillStyle = rg;
+    g.beginPath(); g.ellipse(a.x + off, a.y + 2, rx, ry, 0, 0, 7); g.fill();
+    g.restore();
+  }
+}
+
 /** layer: 0 behind actors · 1 between horde and hero · 2 always over the hero */
 export function drawProps(g, list, layer) {
   if (!list) return;
@@ -223,6 +239,16 @@ const zombieSil = (g, x, y, s, t) => {
   g.fillStyle = "#3a4048";
   g.beginPath(); g.ellipse(2, -338, 9, 7, 0, 0, 7); g.fill();
   g.restore();
+};
+
+const SM_SAFE = {
+  WALL: "#4a4034", WALL_D: "#413829", WALL_L: "#524639",
+  FLOOR: "#3a3128", FLOOR_D: "#2a231c",
+  FRAME: "#6d5a44", FRAME_D: "#4b3d2d",
+  BOARD: "#8a6c46", BOARD_D: "#634c31", BOARD_L: "#a98a60", NAIL: "#24201b",
+  WOOD: "#7a5f42", WOOD_D: "#5a4640",
+  GLASS_T: "#9fd8ef", GLASS_B: "#d8f1e8", GLASS_C: "#e9f7ff",
+  BULB: "#ffe6a8", METAL: "#7d8288", METAL_D: "#3c3f43", HOLE: "#14110d",
 };
 
 export const BACKDROPS = {
@@ -355,7 +381,115 @@ export const BACKDROPS = {
       drawProps(g, props, 1);
     } else if (layer === "over") {
       drawProps(g, props, 2);
+    } else if (layer === "shadow") actorShadows(g, front && front.shadows);
+  },
+
+  // ---------------- THE SAFE ROOM: boarded window, shelf, lamp, floor
+  // Where he actually is on "I think we're safe.": warm, calm, no horde. Two
+  // rescue silhouettes wait behind the boarded window (story sends them as
+  // actors with depth 900+ and base = the window sill).
+  safe(g, W, H, t, layer, front) {
+    if (layer === "shadow") { actorShadows(g, front && front.shadows); return; }
+    if (layer) return;
+    const SK = SM_SAFE;
+    // back wall + plaster
+    g.fillStyle = SK.WALL; g.fillRect(-1400, -600, W + 2800, H + 2600);
+    g.save(); g.globalAlpha = 0.55;
+    for (let r = 0; r < 9; r++) for (let c = -2; c < 9; c++) {
+      const bx = -120 + c * 220 + (r % 2 ? 110 : 0), by = 120 + r * 200;
+      g.fillStyle = (r + c) % 3 ? SK.WALL_D : SK.WALL_L; g.fillRect(bx, by, 196, 96);
     }
+    g.restore();
+    // damp patches
+    g.save(); g.globalAlpha = 0.10; g.fillStyle = "#2b2418";
+    for (const [x, y, rx, ry] of [[300, 420, 150, 90], [980, 700, 120, 70], [640, 300, 90, 60]]) { g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, 7); g.fill(); }
+    g.restore();
+
+    // ---- boarded-up window with daylight behind it (the safe place is INSIDE)
+    const win = { x: 540, y: 410, w: 470, h: 560 };
+    const x0 = win.x - win.w / 2, x1 = win.x + win.w / 2, y0 = win.y, y1 = win.y + win.h;
+    const glow = g.createLinearGradient(0, y0, 0, y1);
+    glow.addColorStop(0, SK.GLASS_T); glow.addColorStop(1, SK.GLASS_B);
+    g.fillStyle = glow; g.fillRect(x0, y0, win.w, win.h);
+    g.save(); g.globalAlpha = 0.5; g.fillStyle = "#dff2ff"; g.fillRect(x0, y0 + win.h * 0.55, win.w, win.h * 0.45); g.restore();
+    // silhouettes first (they stand behind the boards)
+    // window frame
+    g.lineWidth = 22; g.strokeStyle = SK.FRAME; g.strokeRect(x0 - 11, y0 - 11, win.w + 22, win.h + 22);
+    g.lineWidth = 8; g.strokeStyle = SK.FRAME_D; g.beginPath(); g.moveTo(win.x, y0); g.lineTo(win.x, y1); g.stroke();
+    g.beginPath(); g.moveTo(x0, y0 + win.h * 0.5); g.lineTo(x1, y0 + win.h * 0.5); g.stroke();
+    // cracks
+    g.save(); g.globalAlpha = 0.5; g.strokeStyle = SK.GLASS_C; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(x0 + 60, y0 + 40); g.lineTo(x0 + 130, y0 + 150); g.lineTo(x0 + 96, y0 + 260); g.stroke();
+    g.beginPath(); g.moveTo(x1 - 50, y1 - 40); g.lineTo(x1 - 140, y1 - 150); g.lineTo(x1 - 190, y1 - 120); g.stroke();
+    g.restore();
+    // light shaft onto the floor
+    g.save(); g.globalCompositeOperation = "lighter"; g.globalAlpha = 0.16;
+    const shaft = g.createLinearGradient(0, y1, 0, 1640);
+    shaft.addColorStop(0, "#cfe9ff"); shaft.addColorStop(1, "rgba(207,233,255,0)");
+    g.fillStyle = shaft; g.beginPath(); g.moveTo(x0 + 20, y1); g.lineTo(x1 - 20, y1); g.lineTo(x1 + 230, 1640); g.lineTo(x0 - 230, 1640); g.closePath(); g.fill();
+    g.restore();
+    // wooden boards nailed across the window (and their nails)
+    const boards = [[-0.06, 20], [0.22, -14], [0.52, 12], [0.80, -18]];
+    for (const [k, rotDeg] of boards) {
+      const by = y0 + win.h * k, far = win.w * 0.62;
+      g.save(); g.translate(win.x, by); g.rotate(rotDeg * Math.PI / 180);
+      g.fillStyle = SK.BOARD; g.fillRect(-far, -26, far * 2, 46);
+      g.fillStyle = SK.BOARD_D; g.fillRect(-far, 12, far * 2, 8);
+      g.save(); g.globalAlpha = 0.35; g.fillStyle = SK.BOARD_L;
+      for (let i = 0; i < 4; i++) g.fillRect(-far + 30 + i * 150, -18 + (i % 2) * 10, 90, 3); g.restore();
+      for (const nx of [-far + 60, far - 60]) { g.fillStyle = SK.NAIL; g.beginPath(); g.arc(nx, 0, 7, 0, 7); g.fill(); }
+      g.restore();
+    }
+
+    // ---- shelf with supplies (left)
+    const sh = { x: 120, y: 1128, w: 330, h: 300 };
+    g.fillStyle = SK.WOOD; g.fillRect(sh.x, sh.y - sh.h, sh.w, 26);
+    g.fillStyle = SK.WOOD_D; g.fillRect(sh.x, sh.y - sh.h + 26, sh.w, 14);
+    g.fillStyle = SK.WOOD; g.fillRect(sh.x, sh.y - sh.h * 0.45, sh.w, 22);
+    for (const [sx, sy, sw, shh, col] of [[sh.x + 24, sh.y - sh.h - 74, 58, 74, "#8c5a3a"], [sh.x + 92, sh.y - sh.h - 96, 46, 96, "#6f7d6a"], [sh.x + 152, sh.y - sh.h - 54, 70, 54, "#9c4a3a"], [sh.x + 238, sh.y - sh.h - 88, 44, 88, "#7a6a52"], [sh.x + 46, sh.y - sh.h * 0.45 - 66, 90, 66, "#5f6a58"]]) {
+      g.fillStyle = col; g.fillRect(sx, sy, sw, shh);
+      g.fillStyle = "rgba(0,0,0,0.22)"; g.fillRect(sx, sy, sw, 8);
+      g.fillStyle = "rgba(255,255,255,0.14)"; g.fillRect(sx + 6, sy + 10, 6, shh - 20);
+    }
+    // rolled blanket + first-aid box
+    g.fillStyle = "#6b4f3a"; g.fillRect(sh.x + 196, sh.y - sh.h * 0.45 - 30, 104, 30);
+    g.fillStyle = "#efe9dc"; g.fillRect(sh.x + 210, sh.y - sh.h - 46, 96, 46);
+    g.fillStyle = "#c0302f"; g.fillRect(sh.x + 246, sh.y - sh.h - 34, 24, 8); g.fillRect(sh.x + 254, sh.y - sh.h - 42, 8, 24);
+
+    // ---- the manhole cover he just climbed out of (behind him, floor level)
+    g.save(); g.globalAlpha = 0.95;
+    g.fillStyle = SK.HOLE; g.beginPath(); g.ellipse(540, 1618, 150, 44, 0, 0, 7); g.fill();
+    g.lineWidth = 10; g.strokeStyle = SK.METAL_D; g.beginPath(); g.ellipse(540, 1618, 156, 48, 0, 0, 7); g.stroke();
+    g.save(); g.globalAlpha = 0.5; g.fillStyle = SK.METAL; g.beginPath(); g.ellipse(470, 1612, 90, 26, 0, 0, 7); g.fill(); g.restore();
+    g.restore();
+
+    // ---- floor (worn boards) + rug
+    g.fillStyle = SK.FLOOR; g.fillRect(-1400, 1580, W + 2800, H + 1400);
+    g.save(); g.globalAlpha = 0.5; g.fillStyle = SK.FLOOR_D;
+    for (let i = 0; i < 12; i++) g.fillRect(-1400 + i * 260, 1580, 6, H);
+    for (let r = 0; r < 4; r++) g.fillRect(-1400, 1600 + r * 120, W + 2800, 4);
+    g.restore();
+    g.save(); g.globalAlpha = 0.55;
+    g.fillStyle = "#4a3b2c"; g.fillRect(-260, 1606, 900, 250);
+    g.fillStyle = "#5b4834"; g.fillRect(-236, 1624, 852, 214);
+    g.fillStyle = "#3d3024"; g.fillRect(-200, 1650, 780, 162);
+    g.restore();
+
+    // ---- hanging bulb (soft warm light, actually lights the room)
+    g.strokeStyle = "#1d1a16"; g.lineWidth = 5; g.beginPath(); g.moveTo(880, 0); g.lineTo(880, 520); g.stroke();
+    g.fillStyle = SK.METAL_D; g.fillRect(858, 520, 44, 18);
+    g.fillStyle = SK.BULB; g.beginPath(); g.arc(880, 566, 26, 0, 7); g.fill();
+    g.save(); g.globalCompositeOperation = "lighter"; g.globalAlpha = 0.55 + 0.05 * Math.sin(t * 2.1);
+    const lg = g.createRadialGradient(880, 566, 8, 880, 566, 620);
+    lg.addColorStop(0, "rgba(255,226,160,0.9)"); lg.addColorStop(0.35, "rgba(255,206,130,0.28)"); lg.addColorStop(1, "rgba(255,200,120,0)");
+    g.fillStyle = lg; g.beginPath(); g.arc(880, 566, 620, 0, 7); g.fill(); g.restore();
+
+    // ---- "SAFE" spray tag on the wall next to him (diegetic, reads upright)
+    g.save(); g.translate(300, 1268); g.rotate(-0.03);
+    g.font = "900 74px Arial Black, Arial"; g.lineJoin = "round";
+    g.lineWidth = 14; g.strokeStyle = "#2c2418"; g.strokeText("SAFE", 0, 0);
+    g.fillStyle = "#7fbf6a"; g.fillText("SAFE", 0, 0);
+    g.restore();
   },
 
   // ---------------- rooftop alley: hero crouched behind a car / AC unit
@@ -381,6 +515,7 @@ export const BACKDROPS = {
       drawProps(g, props, 0);
     } else if (layer === true) drawProps(g, props, 1);
     else if (layer === "over") drawProps(g, props, 2);
+    else if (layer === "shadow") actorShadows(g, front && front.shadows);
   },
 
   // ---------------- rooftop
@@ -402,6 +537,7 @@ export const BACKDROPS = {
       drawProps(g, props, 0);
     } else if (layer === true) drawProps(g, props, 1);
     else if (layer === "over") drawProps(g, props, 2);
+    else if (layer === "shadow") actorShadows(g, front && front.shadows);
   },
 };
 
@@ -437,9 +573,9 @@ export const FX = {
     for (let i = 0; i < 130; i++) { const x = ((i * 977 + f * 137) % W), y = ((i * 613 + f * 293) % H); g.fillStyle = i % 2 ? "#ffffff" : "#000000"; g.fillRect(x, y, 2, 2); }
     g.restore();
   },
-  vignette(g, W, H) {
+  vignette(g, W, H, k = 1) {
     const rg = g.createRadialGradient(W / 2, H * 0.47, H * 0.34, W / 2, H * 0.47, H * 0.95);
-    rg.addColorStop(0, "rgba(0,0,0,0)"); rg.addColorStop(1, "rgba(0,0,0,0.42)");
+    rg.addColorStop(0, "rgba(0,0,0,0)"); rg.addColorStop(1, `rgba(0,0,0,${0.42 * k})`);
     g.fillStyle = rg; g.fillRect(0, 0, W, H);
   },
   flash(g, W, H, k) { g.save(); g.globalAlpha = k; g.fillStyle = "#ffffff"; g.fillRect(0, 0, W, H); g.restore(); },
@@ -465,13 +601,15 @@ export const FX = {
     g.restore();
   },
 
-  /** Scorched paper scraps blown across the frame (always crossing L→R). */
-  paper(g, W, H, t, k = 1) {
+  /** Scorched paper scraps blown across the frame (always crossing L→R).
+   *  `scroll` (world px) makes the scraps drift WITH the street instead of
+   *  being pinned to the screen, so a sprint reads as the world passing by. */
+  paper(g, W, H, t, k = 1, scroll = 0) {
     g.save();
     for (let i = 0; i < 10; i++) {
       const sp = 260 + (i % 4) * 90;
-      const x = ((i * 397 + t * sp) % (W + 500)) - 250;
-      const y = 700 + ((i * 211) % 900) + Math.sin(t * 2 + i) * 30;
+      const x = ((i * 397 + t * sp + scroll * (0.6 + (i % 3) * 0.2)) % (W + 500)) - 250;
+      const y = 1150 + ((i * 211) % 620) + Math.sin(t * 2 + i) * 22;   // low: road litter, not face confetti
       const rot = t * (2 + (i % 3)) + i;
       g.save(); g.translate(x, y); g.rotate(rot); g.scale(1, 0.35 + 0.65 * Math.abs(Math.cos(t * 3 + i)));
       g.globalAlpha = 0.75 * k; g.fillStyle = i % 2 ? "#cfc6ae" : "#a89c80";
@@ -497,6 +635,44 @@ export const FX = {
   },
 
   /** Screen-space grade: { tint:"#rrggbb", a:0..1, desat:0..1, mode:"multiply|screen" }. */
+  dustmotes(g, W, H, t, k = 1) {
+    g.save();
+    for (let i = 0; i < 34; i++) {
+      const x = 200 + ((i * 331 + t * 26 + Math.sin(t * 0.6 + i) * 40) % 760);
+      const y = 300 + ((i * 197 + t * 14 + Math.cos(t * 0.4 + i) * 26) % 1200);
+      g.globalAlpha = (0.10 + 0.28 * (0.5 + 0.5 * Math.sin(t * 2.2 + i * 1.7))) * k;
+      g.fillStyle = i % 3 ? "#ffe9bd" : "#ffffff";
+      g.beginPath(); g.arc(x, y, 1.4 + (i % 3) * 1.1, 0, 7); g.fill();
+    }
+    g.restore();
+  },
+  safelight(g, W, H, t, k = 1) {
+    // warm, gentle pool around the frame centre — the room is lit, not threatening
+    g.save(); g.globalAlpha = 0.20 * k;
+    const rg = g.createRadialGradient(W / 2, H * 0.42, 120, W / 2, H * 0.42, H * 0.9);
+    rg.addColorStop(0, "rgba(255,214,150,0.55)"); rg.addColorStop(0.55, "rgba(255,196,120,0.10)"); rg.addColorStop(1, "rgba(255,190,110,0)");
+    g.fillStyle = rg; g.fillRect(0, 0, W, H); g.restore();
+  },
+  grit(g, W, H, t, k = 1) {
+    // gravel + dust kicked toward the lens while he sprints
+    g.save();
+    for (let i = 0; i < 26; i++) {
+      const ph = ((t * (1.2 + (i % 5) * 0.3) + i * 0.17) % 1);
+      const x = ((i * 397) % W) + ph * 320 - 160;
+      const y = 1500 + ((i * 211) % 380) - ph * ph * 260;
+      g.globalAlpha = (1 - ph) * 0.55 * k;
+      g.fillStyle = i % 4 ? "#8d8577" : "#c8bda8";
+      g.fillRect(x, y, 3 + (i % 3) * 2, 3 + (i % 2) * 2);
+    }
+    g.restore();
+  },
+  /** flat screen tint on top of everything (the blood pulse on "bleeding") */
+  tint(g, W, H, k) {
+    g.save(); g.globalCompositeOperation = "lighter"; g.globalAlpha = 0.5 * k;
+    const rg = g.createRadialGradient(W / 2, H * 0.6, 60, W / 2, H * 0.6, H * 0.8);
+    rg.addColorStop(0, "rgba(232,30,20,0)"); rg.addColorStop(1, "rgba(232,30,20,0.95)");
+    g.fillStyle = rg; g.fillRect(0, 0, W, H); g.restore();
+  },
   grade(g, W, H, gr) {
     g.save();
     if (gr.desat) {

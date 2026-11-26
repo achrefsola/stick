@@ -35,10 +35,9 @@ def main():
     voice_f, music_f, sfx_f = sys.argv[1:4]
     v, m, s = load(voice_f), load(music_f), load(sfx_f)
     N = max(len(v), len(m), len(s))
-    for x, nm in ((v, "voice"), (m, "music"), (s, "sfx")):
-        if len(x) < N:
-            globals()[nm] = np.pad(x, (0, N - len(x)))
-    v, m, s = globals()["voice"], globals()["music"], globals()["sfx"]
+    if len(v) < N: v = np.pad(v, (0, N - len(v)))
+    if len(m) < N: m = np.pad(m, (0, N - len(m)))
+    if len(s) < N: s = np.pad(s, (0, N - len(s)))
 
     vg = gated_rms(v)
     gm = 0.5 * vg / max(rms(m), 1e-9)

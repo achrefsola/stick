@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Encode frames + mix -> mp4, then QA.   bash finish.sh "Title Of Short"
-set -e; T="${1:-short}"; F="out/${T// /-}.mp4"
+set -e; T="${1:-short}"; F="${OUT_DIR:-.}/${T// /-}.mp4"
 ffmpeg -v error -y -i mix_raw.wav -af "loudnorm=I=-14:TP=-1.5:LRA=7" -ar 48000 -ac 2 mix.wav
 ffmpeg -v error -y -framerate 30 -i frames/f%04d.jpg -i mix.wav -map 0:v:0 -map 1:a:0 -c:v libx264 -preset slow -crf 17 -pix_fmt yuv420p -c:a aac -b:a 192k -shortest -movflags +faststart "$F"
 ffprobe -v error -show_entries format=duration -show_entries stream=width,height,r_frame_rate -of compact "$F"
