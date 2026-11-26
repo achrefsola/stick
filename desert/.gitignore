@@ -1,0 +1,12 @@
+# Build intermediates stay out of git — the deliverable is out/*.mp4
+frames/
+stills/
+work/qc/
+node_modules/
+music.wav
+sfx.wav
+mix.wav
+mix_raw.wav
+*.log
+# regenerable QA sheet
+out/qa_sheet.jpg
