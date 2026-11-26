@@ -155,9 +155,9 @@ const SHOT_DEFS = [
   { start: 685, kind: "youknow",     follow: RUN * 0.3,  move: { z: [1.34, 1.42], y: [1194, 1186], dy: [0, 2], shake: 3 } },
   { start: 713, kind: "bite",        follow: 0, whip: 2, move: { z: [1.42, 1.58], y: [1190, 1172], dy: [0, 6], shake: 5 } },
   { start: 759, kind: "also",        follow: 0,          move: { z: [1.46, 1.56], y: [1188, 1176], dy: [0, 4], shake: 3 } },
-  { start: 776, kind: "ideas",       follow: 0,          move: { z: [1.5, 1.64],  y: [1186, 1172], dy: [0, 4], shake: 4 } },
-  { start: 792, kind: "what",        follow: 0,          move: { z: [1.5, 1.92],  y: [1186, 1162], dy: [2, 12], shake: 3 } },
-  { start: 803, kind: "payoff",      follow: 0, zoom: true, move: { z: [1.56, 2.3], y: [1152, 1124], dy: [-4, 18], shake: 5 } },
+  { start: 776, kind: "ideas",       follow: 0,          move: { z: [1.5, 1.64],  y: [1186, 1172], dy: [0, 4], shake: 5 } },
+  { start: 792, kind: "what",        follow: 0,          move: { z: [1.5, 1.92],  y: [1186, 1162], dy: [2, 12], shake: 8 } },
+  { start: 803, kind: "payoff",      follow: 0, zoom: true, move: { z: [1.56, 2.3], y: [1152, 1124], dy: [-4, 18], shake: 10 } },
 ];
 export const SHOTS = SHOT_DEFS.map((d, i) => {
   const next = i + 1 < SHOT_DEFS.length ? SHOT_DEFS[i + 1].start : TOTAL;
@@ -222,7 +222,10 @@ function camState(f) {
   }
   const si = shotIndex(f), s = SHOTS[si], f0 = si ? CUM[si - 1] : 0;
   const k = clamp01((f - f0) / Math.max(1, s.n - 1));
-  const sh = s.move.shake ?? 3, zoomP = s.zoom ? smooth((k - 0.45) / 0.55) : 0;
+  // ramp the shake in over the first frames of a shot: the amplitude changes at a
+  // cut while the sine phase is continuous, so an instant step = a visible jolt.
+  const shRamp = Math.min(1, (f - f0 + 1) / 5);
+  const sh = (s.move.shake ?? 3) * shRamp, zoomP = s.zoom ? smooth((k - 0.45) / 0.55) : 0;
   const x = _cam.x + Math.sin(f * 0.077) * 12 + Math.sin(f * 0.31) * sh * 0.5 + Math.sin(f * 2.3) * sh * zoomP * 1.8;
   const y = _cam.y + Math.cos(f * 0.059) * 9 + Math.cos(f * 0.27) * sh * 0.45 + Math.sin(f * 3.1) * sh * zoomP * 1.5;
   const z = _cam.z + zoomP * 0.1;
@@ -281,9 +284,12 @@ function heroFrame(f, kind, f0, lp) {
       a.L = "road"; a.R = f < M.zombie ? "roadpoint" : "point";
       if (f >= M.zombie) a.headTilt = -0.05;
       break;
-    case "subscribe": // "like and subscribe" — the selfie smile, running backwards
+    case "subscribe": // "like and subscribe" — selfie: phone up, eyes ON the screen
       a.gear = RIG; a.expr = "happy"; a.facing = -0.3; a.run = 0.9; a.step = (f * 0.18) % 1;
-      a.L = "road"; a.R = "point"; a.headTilt = 0.04;
+      a.L = "road"; a.R = "selfie"; a.headTilt = 0.04;
+      a.props = { phone: { hand: "R", rot: -26, glow: 0.85 } };
+      // gaze tracks the phone in his raised hand (not the lens) — he reads the screen
+      a.look = 0.62;
       break;
     case "ohno": // "Oh no!" — the fans are suddenly in the lane
       a.gear = RIG; a.expr = f < M.oh ? "scared" : "surprised"; a.facing = -0.3; a.run = 1; a.step = (f * 0.2) % 1;
@@ -335,7 +341,8 @@ function heroFrame(f, kind, f0, lp) {
     case "youknow": // lowers the phone, goes thoughtful
       a.facing = 0.1; a.expr = "thinking"; a.L = "hang"; a.R = "point"; a.run = 0.25; a.step = (f * 0.05) % 1;
       a.props = { phone: { hand: "R", rot: -6, glow: 0.9 }, bandage: { x: 1 } };
-      a.bloodFx = { on: true, k: 0.5, pulse: true, t: f / 30, seed: 2, hand: [672, 1010], drips: 2, armSpray: true };
+      // the phone is the hero here, not the wound: just a slow drip, no spray
+      a.bloodFx = { on: true, k: 0.45, pulse: true, t: f / 30, seed: 2, drips: 1 };
       break;
     case "bite": // "Yes, I'm the content now." — shrugs at the wound, smile back on
       a.expr = f < M.content ? "surprised" : "happy";
@@ -389,8 +396,15 @@ const WAVES = [
 ];
 WAVES.forEach((wv, wi) => {
   wv.dx.forEach((dx, j) => {
+    const h = hash(wi * 17 + j);
     PACK.push({ wave: wi, dx, dy: (wv.y - 1600), y: wv.y, s: wv.s, z: wv.s, spread: wv.spread,
-      ph: hash(wi * 17 + j) * 6.28, near: wi < 2, side: Math.sign(dx) });
+      ph: h * 6.28, near: wi < 2, side: Math.sign(dx),
+      // DEPTH: they run at their own speeds, so the frame keeps changing — near waves
+      // overtake him (drift toward frame centre), far waves fall behind. A pack that
+      // never moves relative to the camera reads as a wallpaper. Differential by wave
+      // so near and far rows slide past each other (real parallax, not a rigid wall).
+      drift: -(1.6 + h * 2.2) * (1 - wi / 9),
+      bobAmp: 0.09 + h * 0.08 });
   });
 });
 const GAP_OPEN = 235;     // half-width of the lane they leave round the hero
@@ -416,8 +430,13 @@ function hordeAt(f, si, kind, hero) {
     // lurch: each fan advances and shuffles sideways every beat
     const lane = 1 - 0.55 * clamp01(dx);                    // how much they close INTO the lane
     const px = b.dx * lane;
-    const push = Math.abs(px) < GAP_OPEN * b.s ? Math.sign(px || 1) * (GAP_OPEN * b.s - Math.abs(px)) * 0.85 : 0;
-    let x = 540 + px + push + Math.sin(ph * 2.7 + i) * 11;
+    // the pack RUNS: a persistent per-member drift (px/frame). Near waves close in on
+    // him, far waves fall behind, so bodies enter and leave the frame instead of the
+    // whole pack tracking the camera like a backdrop.
+    const travel = ago * b.drift;
+    const gap = GAP_OPEN * b.s * (1 - 0.25 * clamp01(dx)) * (kind === "legs" ? 2.4 : 1);
+    const sideX = px + travel - Math.sign(px || 1) * Math.max(0, gap - Math.abs(px));
+    let x = 540 + sideX;
     let y = b.y + dy * (0.5 + 0.5 * b.z) + Math.sin(ph * 6.4 + i) * 5;
     const z = b.z;
     let run = 0.45 + 0.4 * Math.sin(ph * 2.2 + i);
@@ -456,7 +475,10 @@ function hordeAt(f, si, kind, hero) {
     out.push({
       zombie: true, depth: 600 + i * 10 + hash(i) * 5, x, y, scale: z * 1.02, facing, expr,
       step, run: Math.max(0, Math.min(1, run)), L, R, tilt,
-      bob: Math.sin(ph * 6.2 + i) * 0.13, headTilt: Math.sin(ph * 2.7 + i) * 0.06,
+      // DEPTH: air between the waves darkens/hazes the back rows, and every figure
+      // gets a ground contact shadow so nobody floats on the road.
+      tint: Math.min(0.42, b.wave * 0.062), shadow: true,
+      bob: Math.sin(ph * 6.2 + i) * b.bobAmp, headTilt: Math.sin(ph * 2.7 + i) * 0.06,
     });
   }
   return out;
@@ -472,15 +494,30 @@ export const SAFE_ROOM = {
   board: { x: 540, y: 846 },
 };
 
-// two rescue silhouettes behind the boarded window (stick figures, not zombies)
-function rescueAt(f, base) {
+// Two rescue survivors behind the boarded window. They are NOT clones of the
+// hero: one wears a head-lamp (bare head + hair), one a dark peaked cap and a
+// hi-vis vest. On "safe" the left one crosses to him and hands over a bottle —
+// a small, real beat so the room reads as a place with other people in it.
+function rescueAt(f, base, hero) {
   if (!base) return [];
-  return [0, 1].map((i) => ({
-    zombie: false, depth: 900 + i * 10, base: base.y + 196,
-    x: 540 + (i ? 268 : -262), y: base.y + 196, scale: 0.6, facing: i ? -0.2 : 0.2, expr: "happy",
-    step: 0, run: 0, L: i ? "kayak" : "hang", R: i ? "point" : "kayak", tilt: (i ? -4 : 4),
-    bob: Math.sin(f * 0.08 + i * 2) * 0.03, headTilt: 0, blink: 0, look: 0,
-  }));
+  const sy = base.y + 196;
+  const reach = smooth((f - (M.safe - 2)) / 20);          // 0 before the word, 1 after
+  // the helper steps toward the hero, then STOPS short and offers the bottle
+  // (he must never walk into the hero's silhouette)
+  const helperX = 540 - 262 + reach * 96;
+  return [
+    { zombie: false, depth: 900, base: sy, x: helperX, y: sy, scale: 0.62,
+      facing: lerp(-0.1, 0.5, reach), expr: "happy",
+      step: 0, run: 0, cap: "lamp", vest: false,
+      L: "hang", R: reach > 0.15 ? "offer" : "kayak", tilt: 4,
+      props: null,
+      bob: Math.sin(f * 0.08) * 0.03, headTilt: -0.03 * reach, blink: 0,
+      look: lerp(0.25, 0.55, reach) },
+    { zombie: false, depth: 910, base: sy, x: 540 + 268, y: sy, scale: 0.6,
+      facing: -0.2, expr: "relieved", step: 0, run: 0, cap: "visor", vest: true,
+      L: "kayak", R: "point", tilt: -4,
+      bob: Math.sin(f * 0.08 + 2) * 0.03, headTilt: 0, blink: 0, look: -0.15 },
+  ];
 }
 
 export const actorsAt = (f) => {
@@ -489,7 +526,7 @@ export const actorsAt = (f) => {
   const lp = (fi - f0) / Math.max(1, SHOTS[si].n);
   const hero = heroFrame(fi, kind, f0, lp);
   const out = [hero];
-  if (kind === "safe") { out.push(...rescueAt(fi, SHOTS[si].rescue)); return out; }
+  if (kind === "safe") { out.push(...rescueAt(fi, SHOTS[si].rescue, hero)); return out; }
   let horde = hordeAt(fi, si, kind, hero);
   if (kind === "legs") horde = horde.slice(0, 6).map((m, i) => ({ ...m, scale: 0.46 + i * 0.03, y: 1800 + i * 18, x: 300 + i * 96 }));
   out.push(...horde);

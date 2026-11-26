@@ -113,7 +113,11 @@ export function drawStick(g, opts = {}) {
   const { expr = "neutral", blink = 0, look = 0, facing = 0,
     L = "hang", R = "hang", step = 0, run = 0, tilt = 0, headTilt = 0, bob = 0,
     gear = null, cone = 0, cx: CX = SM_CX, soles = SM_SOLES, scale = 1,
-    props = null, bloodFx = null, zombie = false, viseme = null } = opts;
+    props = null, bloodFx = null, zombie = false, viseme = null,
+    // SURVIVOR VARIANTS: companions share the hero's body but must never be
+    // mistaken for him. cap:"red" (hero) | "none" | "lamp" | "visor", and an
+    // optional hi-vis vest so the safe-room pair read as other people at a glance.
+    cap = "red", vest = false } = opts;
   // a viseme replaces the mouth only — the eyes and brows keep the feeling
   const E0 = SM.EXPR[expr] || SM.EXPR.neutral;
   const V = viseme ? (SM.VISEME[viseme.viseme] || SM.VISEME.open) : null;
@@ -134,18 +138,26 @@ export function drawStick(g, opts = {}) {
   const headC = neck - SM_HEAD.b + headTilt * 0.6;
 
   // ---------------------------------------------------------- legs + shoes
+  // The lean is carried by the WHOLE body: the legs are drawn inside the same
+  // rotation as the torso, so a sprint leans into its own legs. The planted foot
+  // stays on the ground line while the recovery leg swings through, and the knee
+  // drives forward-and-up (never a stiff two-line hop).
   rot(tilt, CX, hipY);
-  const stride = 30 + run * 74, lift = 24 + run * 74;
+  const moving = true;                      // `step` is a phase in [0,1); run=0 is the walk
+  const stride = 20 + run * 84, lift = 16 + run * 88;
   for (const sideSign of [-1, 1]) {
-    const ph = (step + (sideSign > 0 ? 0.5 : 0)) % 1;
-    const up = Math.max(0, Math.sin(Math.PI * 2 * ph)) * lift * (step ? 1 : 0);
-    const fw = Math.sin(Math.PI * 2 * ph) * stride * (step ? 1 : 0);
+    const ph = moving ? (step + (sideSign > 0 ? 0.5 : 0)) % 1 : 0;
+    const s2 = moving ? Math.sin(Math.PI * 2 * ph) : 0;           // forward (+1) / back (-1)
+    const up = moving ? Math.max(0, s2) * lift : 0;               // only the recovery leg lifts
+    const fw = moving ? s2 * stride : 0;
+    const plant = moving ? Math.min(0, s2) * (4 + run * 34) : 0;  // planted foot slides back under him
     const hipX = CX + sideSign * 12;
-    const footX = CX + sideSign * 10 + fw + (run ? dir * 12 : 0);
-    const footY = SM_SOLES - lpSafe(up) - bobY * (sideSign > 0 ? 0.6 : 1);
+    const footX = CX + sideSign * 10 + fw + plant + (run ? dir * 12 : 0);
+    const footY = SM_SOLES - up;
     // sprint: the knee drives forward and UP while the shoe kicks back
-    const kneeX = (hipX + footX) / 2 + sideSign * 6 + (run ? dir * (14 + run * 26) : 0);
-    const kneeY = (hipY + footY) / 2 - (sideSign > 0 ? 8 : 2) - up * (0.15 + run * 0.32);
+    // the knee leads the foot: forward of the hip-foot midpoint, lifted on the recovery
+    const kneeX = (hipX + footX) / 2 + sideSign * 4 + (run ? dir * (10 + run * 18) : 0) - up * 0.34;
+    const kneeY = (hipY + footY) / 2 - (sideSign > 0 ? 8 : 2) - up * (0.2 + run * 0.34);
     smStroke(g, sm_curve([hipX, hipY], [kneeX, kneeY], [footX, footY]), lw, ink);
     const sw = 30 * scale;
     // dark ground contact + warm sneaker with a visible sole edge (never confusable
@@ -159,6 +171,7 @@ export function drawStick(g, opts = {}) {
 
   // ---------------------------------------------------------- torso
   smStroke(g, [[CX, neck], [CX, hipY]], lw * scale, ink);
+  if (vest) drawVest(g, CX, neck, sho, hipY, lw, scale);
 
   // ---------------------------------------------------------- arms
   const shoulder = (sideS) => [CX + sideS * 8, sho];
@@ -190,6 +203,11 @@ export function drawStick(g, opts = {}) {
       case "roadreach": { const ph = step % 1; const sw = Math.sin(Math.PI * 2 * ph + (sideSign > 0 ? 0 : Math.PI));
         r = { pts: [s, [CX + sideSign * 54, sho + 20], [CX + sideSign * 22 + sw * 46, sho + 96 - Math.abs(sw) * 40]], prop: null }; } break;
       case "kayak": r = { pts: [s, [X(36), sho + 54], [X(64), sho - 6]], prop: null }; break;
+      // selfie: the phone hand stays out to the side at chest height so the
+      // SCREEN shows to the lens but the mouth is never covered
+      case "selfie": r = { pts: [s, [X(54), sho + 66], [X(118), sho + 44]], prop: null }; break;
+      // offering something to someone: both forearms come up and forward together
+      case "offer": r = { pts: [s, [X(40), sho + 34], [X(104), sho + 20]], prop: "bottle" }; break;
       case "lean": r = { pts: [s, [X(30), sho + 90], [X(10), sho + 178]], prop: null }; break;
       case "chest": r = { pts: [s, [X(22), sho + 60], [CX + sideSign * 26, sho + 44]], prop: null }; break;
       default: r = { pts: [s, [CX + sideSign * 26, sho + 130], [CX + sideSign * 20, sho + 300]], prop: null };
@@ -202,6 +220,7 @@ export function drawStick(g, opts = {}) {
     const [hx, hy] = a.pts[2];
     if (a.prop === "flashlight") drawFlashlight(g, hx, hy, a.pa ?? -30, cone, scale);
     else smDot(g, hx, hy, 15 * scale, SM.HAND);
+    if (a.prop === "bottle") drawBottle(g, hx + 12 * scale, hy - 4 * scale, scale);
     if (zombie) drawZombieBite(g, a.pts, a.side, scale);
     // arm-mounted selfie rig (vlog close-up camera) on the pointing arm, above the hand
     if (gearArr.includes("vlog-rig") && a.side > 0) {
@@ -241,10 +260,11 @@ export function drawStick(g, opts = {}) {
   const hc = headC, HA = SM_HEAD.a, HB = SM_HEAD.b;
   smEll(g, CX, hc, HA, HB, zombie ? SM.ZFACE : SM.FACE, 5 * scale, zombie ? SM.ZINK : ink);
   if (back) {
-    drawCapBack(g, CX, hc, HA, HB, zombie);
+    if (cap === "red" || zombie) drawCapBack(g, CX, hc, HA, HB, zombie);
   } else {
     if (!zombie) drawHair(g, CX, hc, HA, HB, dir, side, false);
-    drawCap(g, CX, hc, HA, HB, dir, side, zombie);
+    if (zombie) drawCap(g, CX, hc, HA, HB, dir, side, true);
+    else drawHeadwear(g, cap, CX, hc, HA, HB, dir, side, scale);
     if (zombie) drawZombieFace(g, CX, hc, HA, HB, dir, side, look, scale);
     else drawFace(g, CX, hc, HA, HB, E, blink, look, dir, side, scale);
   }
@@ -268,6 +288,9 @@ export function drawStick(g, opts = {}) {
   }
   if (gearArr.includes("notebook") && !arms.some((a) => a.prop)) {
     const [hx, hy] = arms[1].pts[2]; drawNotebook(g, hx + 18 * scale, hy + 6, scale);
+  }
+  if (PR.bottle && !arms.some((a) => a.prop === "bottle")) {
+    const [hx, hy] = arms[PR.bottle.x >= 0 ? 1 : 0].pts[2]; drawBottle(g, hx + (PR.bottle.x >= 0 ? 14 : -14) * scale, hy + 8 * scale, scale);
   }
   if (gearArr.includes("bottle") && !arms.some((a) => a.prop)) {
     const [hx, hy] = arms[0].pts[2]; drawBottle(g, hx - 14 * scale, hy + 10, scale);
@@ -314,6 +337,49 @@ function drawCapBack(g, cx, hc, HA, HB, zombie = false) {
   smStroke(g, [[cx + HA * 0.30, bandY + 9], [cx + HA * 0.30, bandY + 36]], 5, CAP_D);
   for (let i = 0; i < 3; i++) smStroke(g, [[cx + HA * 0.30 - 8, bandY + 26 + i * 8], [cx + HA * 0.30 + 8, bandY + 26 + i * 8]], 3, CAP_D);
   if (!zombie) drawHair(g, cx, hc, HA, HB, 1, false, true);
+}
+// ------------------------------------------------------------- survivor headwear + vest
+// Companions dress differently from the hero: a bare head with a head-lamp, or a
+// peaked visor. Nothing here may reuse SM.CAP (that's the hero's silhouette).
+function drawHeadwear(g, style, cx, hc, HA, HB, dir, side, scale = 1) {
+  if (style === "red") { drawCap(g, cx, hc, HA, HB, dir, side, false); return; }
+  if (style === "none") return;
+  if (style === "visor") {
+    // flat peaked cap, dark serge (not red): a different person's kit
+    const bandY = hc - HB * 0.30, top = hc - HB, D = "#33383f", L = "#4a5058";
+    const dome = [];
+    for (let i = 0; i <= 32; i++) { const a = Math.PI + (Math.PI * i / 32); dome.push([cx + Math.cos(a) * (HA + 6), bandY + Math.sin(a) * (HB + 6)]); }
+    smFill(g, dome, D); smStroke(g, dome, 5, "#20242a");
+    smStroke(g, [[cx - HA - 4, bandY + 2], [cx + HA + 4, bandY + 2]], 6, "#20242a");
+    const by = bandY - 8, x0 = cx + dir * (HA - 30), x1 = cx + dir * (HA + 58);
+    g.save(); g.translate(cx, bandY); g.rotate(dir * sm_rad(9)); g.translate(-cx, -bandY);
+    smFill(g, sm_rrect(Math.min(x0, x1), by - 13, Math.max(x0, x1), by + 12, 11), "#20242a");
+    smStroke(g, [[cx + dir * (HA - 26), by + 8], [x1 - dir * 4, by + 7]], 4, L);
+    g.restore();
+    return;
+  }
+  if (style === "lamp") {
+    // bare head: brown hair + a strapped head-lamp with a lit lens
+    drawHair(g, cx, hc, HA, HB, dir, side, false);
+    const bandY = hc - HB * 0.46;
+    smStroke(g, [[cx - HA - 2, bandY + 4], [cx + HA + 2, bandY - 2]], 12, "#2b3037");
+    const lx = cx + dir * (HA - 6), ly = bandY - 4;
+    smEll(g, lx, ly, 15, 15, "#e8d27a", 4, "#141619");
+    smEll(g, lx + dir * 3, ly, 7, 7, "#fff6c8");
+    // a small warm cone of light leaving the lens
+    smFill(g, [[lx, ly], [lx + dir * 190, ly - 120], [lx + dir * 190, ly + 120]], "rgba(255,238,170,0.14)");
+  }
+}
+// hi-vis safety vest: two straps over the shoulders + reflective bands. Drawn on
+// the torso so it reads at any camera distance.
+function drawVest(g, CX, neck, sho, hipY, lw, scale) {
+  const HI = "#e2b53a", HI_D = "#b8901f", RE = "#dfe6ec";
+  const w = 34;
+  for (const s of [-1, 1]) smStroke(g, [[CX + s * 26, sho + 6], [CX + s * 30, sho + 120], [CX + s * 26, hipY - 4]], w, HI);
+  smStroke(g, [[CX - w, sho + 78], [CX + w, sho + 78]], 11, RE);
+  smStroke(g, [[CX - w, sho + 78], [CX + w, sho + 78]], 3, HI_D);
+  smStroke(g, [[CX - w, sho + 150], [CX + w, sho + 150]], 11, RE);
+  smStroke(g, [[CX - w, sho + 150], [CX + w, sho + 150]], 3, HI_D);
 }
 function drawHair(g, cx, hc, HA, HB, dir, side, backTuft = false) {
   const tuft = (x, y, a, l) => {

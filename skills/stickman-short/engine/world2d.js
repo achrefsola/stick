@@ -190,6 +190,22 @@ const wallProp = (g, o) => {
 /** dispatch table: story FRONT objects use {kind: "car", x, y, scale, ...} */
 export const PROPS = { car: carProp, pole: poleProp, trash: trashProp, hydrant: hydrantProp, sign: signProp, fence: fenceProp, wall: wallProp };
 
+/** Contact shadows for actors standing on the road: one soft ellipse each, sized by
+ *  the actor's scale and thrown slightly away from frame centre (a single key light). */
+export function actorShadows(g, list) {
+  if (!list || !list.length) return;
+  for (const a of list) {
+    const s = a.scale || 1, rx = 52 * s, ry = 11 * s;
+    const off = (a.x - 540) * 0.06;
+    g.save();
+    const rg = g.createRadialGradient(a.x + off, a.y + 2, 2, a.x + off, a.y + 2, rx);
+    rg.addColorStop(0, "rgba(4,7,11,0.55)"); rg.addColorStop(0.7, "rgba(4,7,11,0.28)"); rg.addColorStop(1, "rgba(4,7,11,0)");
+    g.fillStyle = rg;
+    g.beginPath(); g.ellipse(a.x + off, a.y + 2, rx, ry, 0, 0, 7); g.fill();
+    g.restore();
+  }
+}
+
 /** layer: 0 behind actors · 1 between horde and hero · 2 always over the hero */
 export function drawProps(g, list, layer) {
   if (!list) return;
@@ -365,7 +381,7 @@ export const BACKDROPS = {
       drawProps(g, props, 1);
     } else if (layer === "over") {
       drawProps(g, props, 2);
-    }
+    } else if (layer === "shadow") actorShadows(g, front && front.shadows);
   },
 
   // ---------------- THE SAFE ROOM: boarded window, shelf, lamp, floor
@@ -373,6 +389,7 @@ export const BACKDROPS = {
   // rescue silhouettes wait behind the boarded window (story sends them as
   // actors with depth 900+ and base = the window sill).
   safe(g, W, H, t, layer, front) {
+    if (layer === "shadow") { actorShadows(g, front && front.shadows); return; }
     if (layer) return;
     const SK = SM_SAFE;
     // back wall + plaster
@@ -498,6 +515,7 @@ export const BACKDROPS = {
       drawProps(g, props, 0);
     } else if (layer === true) drawProps(g, props, 1);
     else if (layer === "over") drawProps(g, props, 2);
+    else if (layer === "shadow") actorShadows(g, front && front.shadows);
   },
 
   // ---------------- rooftop
@@ -519,6 +537,7 @@ export const BACKDROPS = {
       drawProps(g, props, 0);
     } else if (layer === true) drawProps(g, props, 1);
     else if (layer === "over") drawProps(g, props, 2);
+    else if (layer === "shadow") actorShadows(g, front && front.shadows);
   },
 };
 
@@ -582,13 +601,15 @@ export const FX = {
     g.restore();
   },
 
-  /** Scorched paper scraps blown across the frame (always crossing L→R). */
-  paper(g, W, H, t, k = 1) {
+  /** Scorched paper scraps blown across the frame (always crossing L→R).
+   *  `scroll` (world px) makes the scraps drift WITH the street instead of
+   *  being pinned to the screen, so a sprint reads as the world passing by. */
+  paper(g, W, H, t, k = 1, scroll = 0) {
     g.save();
     for (let i = 0; i < 10; i++) {
       const sp = 260 + (i % 4) * 90;
-      const x = ((i * 397 + t * sp) % (W + 500)) - 250;
-      const y = 700 + ((i * 211) % 900) + Math.sin(t * 2 + i) * 30;
+      const x = ((i * 397 + t * sp + scroll * (0.6 + (i % 3) * 0.2)) % (W + 500)) - 250;
+      const y = 1150 + ((i * 211) % 620) + Math.sin(t * 2 + i) * 22;   // low: road litter, not face confetti
       const rot = t * (2 + (i % 3)) + i;
       g.save(); g.translate(x, y); g.rotate(rot); g.scale(1, 0.35 + 0.65 * Math.abs(Math.cos(t * 3 + i)));
       g.globalAlpha = 0.75 * k; g.fillStyle = i % 2 ? "#cfc6ae" : "#a89c80";

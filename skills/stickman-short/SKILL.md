@@ -95,6 +95,25 @@ Transcribe `voice.mp3` with word timestamps (whisper) into a `PHRASES` table of
 Never invent a beat the voice does not say: if the audio says a quieter line (e.g. a calm
 aside at −12 dB), give it its own calmer shot instead of reusing the chase staging.
 
+### 4.5c Body & crowd physics (a dead leg or a frozen crowd is a bug, not a style)
+- **Legs carry the lean and the stride.** Draw the legs INSIDE the body rotation
+  (`rot(tilt,...)` before the leg loop) so a sprint leans into its own legs, split the
+  two legs by a real phase (`step` and `step+0.5`), keep the planted foot on the ground
+  line while the recovery leg swings through, and drive the knee forward-and-up.
+  A constant `footX` offset is not a stride — verify with a phase sheet (8 phases ×
+  hero sprint / zombie sprint / walk) before the full render.
+- **The crowd must move relative to the hero AND the camera.** A pack that tracks the
+  camera 1:1 is wallpaper. Give every member a persistent per-figure drift so near
+  waves overtake him and far waves fall behind; in a chase, at least one figure must
+  enter and one leave the frame per shot. Never let a member cross the hero silhouette.
+- **Depth is not optional:** back rows get an aerial-perspective tint (darker as they
+  recede) and every standing figure gets a ground contact shadow, or the shot reads flat.
+- **Companions are variants, not clones.** If other survivors appear, change the
+  silhouette (head-wear + vest), never reuse the hero's red cap; give them a small
+  action (a hand-off) so the room reads as people, not mannequins.
+- **Screen-space FX must scroll with the world.** Embers/paper/litter that never move
+  while he runs break the illusion — feed them `scrollAt(f)`.
+
 ### 4.6 Look check (before the full render)
 `WEB=<proj>/web node tools/render.mjs stills/a "0,45,90,..."` then
 `python3 tools/sheet.py stills/a stills/sheet.jpg 6`. Look for: character off-frame (anchor
